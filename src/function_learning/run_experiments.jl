@@ -146,6 +146,16 @@ end
     initial_coeffs = [NAML.unwrap(c) for c in NAML.center(initial_param)]
     initial_accuracy = compute_accuracy(initial_coeffs, data, threshold, scale)
 
+    # Post-run callback to compute classification accuracy for each optimizer
+    post_run_fn = (optim) -> begin
+        final_coeffs = [NAML.unwrap(c) for c in NAML.center(optim.param)]
+        final_accuracy = compute_accuracy(final_coeffs, data, threshold, scale)
+        Dict{String, Any}(
+            "final_accuracy" => final_accuracy,
+            "accuracy_improvement" => final_accuracy - initial_accuracy,
+        )
+    end
+
     # Get suite configs (SuiteName => {OptName => Setup})
     suite_configs = get_optimizer_configs(config, args)
 
@@ -307,16 +317,19 @@ if args.save_results
         git_commit=args.git_commit,
     )
 
-    output_fn = if !isnothing(args.output_filename)
-        args.output_filename
+    output_path = if isnothing(args.output_filename)
+        repo_root = normpath(joinpath(@__DIR__, "..", ".."))
+        logs_dir = joinpath(repo_root, "logs")
+        mkpath(logs_dir)
+        ts = Dates.format(Dates.now(), "yyyymmdd_HHMMSS")
+        joinpath(logs_dir, "function_learning_$(ts).json")
     else
-        timestamp = Dates.format(Dates.now(), "yyyymmdd_HHMMSS")
-        "function_learning_results_$(timestamp)_raw.json"
+        isabspath(args.output_filename) ||
+            error("--output must be an absolute path, got: $(args.output_filename)")
+        args.output_filename
     end
-    filepath = joinpath(@__DIR__, output_fn)
 
-    save_raw_results(all_results, metadata, filepath)
-    save_to_logs(filepath)
+    save_raw_results(all_results, metadata, output_path)
 end
 
 println("\n✓ All experiments complete!")

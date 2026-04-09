@@ -7,10 +7,7 @@ with computed aggregates: mean/std/min/max across samples, per-sample rankings,
 and cross-experiment global rankings.
 
 Usage:
-    julia --project=. src/make_stats.jl <raw_results.json> [--output stats.json]
-
-The output file defaults to replacing "_raw.json" with "_stats.json" in the input filename,
-or appending "_stats" before ".json" if no "_raw" suffix is found.
+    julia --project=. src/make_stats.jl <raw_results.json> --output <absolute path>
 """
 
 using JSON
@@ -35,17 +32,15 @@ input_file = ARGS[1]
 output_file = nothing
 for (i, arg) in enumerate(ARGS)
     if arg == "--output" && i < length(ARGS)
-        output_file = ARGS[i+1]
+        global output_file = ARGS[i+1]
     end
 end
 
 if isnothing(output_file)
-    if endswith(input_file, "_raw.json")
-        output_file = replace(input_file, "_raw.json" => "_stats.json")
-    else
-        output_file = replace(input_file, ".json" => "_stats.json")
-    end
+    error("make_stats.jl requires --output <absolute path>")
 end
+isabspath(output_file) ||
+    error("--output must be an absolute path, got: $output_file")
 
 # ============================================================================
 # Load raw results
@@ -77,7 +72,7 @@ if isempty(optimizer_order)
         if haskey(exp, "samples")
             for sample in exp["samples"]
                 if haskey(sample, "optimizers")
-                    optimizer_order = collect(keys(sample["optimizers"]))
+                    global optimizer_order = collect(keys(sample["optimizers"]))
                     break
                 end
             end

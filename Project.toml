@@ -1,6 +1,7 @@
 [deps]
 NAML = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 PkgTemplates = "14b8a8f1-9102-5b29-a752-f990bacb7fe1"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 
 [sources]
 NAML = {path = "../naml"}

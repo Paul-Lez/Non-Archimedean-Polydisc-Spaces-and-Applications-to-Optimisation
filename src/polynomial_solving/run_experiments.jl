@@ -255,16 +255,19 @@ if args.save_results
         git_commit=args.git_commit,
     )
 
-    output_fn = if !isnothing(args.output_filename)
-        args.output_filename
+    output_path = if isnothing(args.output_filename)
+        repo_root = normpath(joinpath(@__DIR__, "..", ".."))
+        logs_dir = joinpath(repo_root, "logs")
+        mkpath(logs_dir)
+        ts = Dates.format(Dates.now(), "yyyymmdd_HHMMSS")
+        joinpath(logs_dir, "polynomial_solving_$(ts).json")
     else
-        timestamp = Dates.format(Dates.now(), "yyyymmdd_HHMMSS")
-        "polynomial_solving_results_$(timestamp)_raw.json"
+        isabspath(args.output_filename) ||
+            error("--output must be an absolute path, got: $(args.output_filename)")
+        args.output_filename
     end
-    filepath = joinpath(@__DIR__, output_fn)
 
-    save_raw_results(all_results, metadata, filepath)
-    save_to_logs(filepath)
+    save_raw_results(all_results, metadata, output_path)
 end
 
 println("\n✓ All experiments complete!")
