@@ -172,6 +172,10 @@ START_TIME=$(date +%s)
 # most recent run without having to know the timestamp.
 # ----------------------------------------------------------------------------
 
+# Workers spawned with -p N inherit environment variables but not the --project
+# flag. Setting JULIA_PROJECT ensures every worker activates the same environment.
+export JULIA_PROJECT="$REPO_ROOT"
+
 RUN_TS="$(date +%Y%m%d_%H%M%S)"
 RUN_DIR="$REPO_ROOT/logs/$RUN_TS"
 mkdir -p "$RUN_DIR"
@@ -230,10 +234,32 @@ run_pipeline() {
 # identifier consumed by generate_figures.jl, so the two stay in sync.
 # ----------------------------------------------------------------------------
 
-run_pipeline "$SCRIPT_DIR/absolute_sum_minimization" "absolute_sum_minimization"
-run_pipeline "$SCRIPT_DIR/function_learning"        "function_learning"
-run_pipeline "$SCRIPT_DIR/polynomial_learning"      "polynomial_learning"
-run_pipeline "$SCRIPT_DIR/polynomial_solving"       "polynomial_solving"
+echo "Starting all 4 experiment pipelines in parallel..."
+declare -a PIDS=()
+
+( run_pipeline "$SCRIPT_DIR/absolute_sum_minimization" "absolute_sum_minimization" 2>&1 \
+    | awk -v n="absolute_sum_minimization" '{print "["n"] "$0; fflush()}' ) &
+PIDS+=($!)
+( run_pipeline "$SCRIPT_DIR/function_learning" "function_learning" 2>&1 \
+    | awk -v n="function_learning" '{print "["n"] "$0; fflush()}' ) &
+PIDS+=($!)
+( run_pipeline "$SCRIPT_DIR/polynomial_learning" "polynomial_learning" 2>&1 \
+    | awk -v n="polynomial_learning" '{print "["n"] "$0; fflush()}' ) &
+PIDS+=($!)
+( run_pipeline "$SCRIPT_DIR/polynomial_solving" "polynomial_solving" 2>&1 \
+    | awk -v n="polynomial_solving" '{print "["n"] "$0; fflush()}' ) &
+PIDS+=($!)
+
+FAILED=0
+for PID in "${PIDS[@]}"; do
+    if ! wait "$PID"; then
+        FAILED=$((FAILED + 1))
+    fi
+done
+
+if [ "$FAILED" -gt 0 ]; then
+    err "$FAILED experiment pipeline(s) failed"
+fi
 
 # ----------------------------------------------------------------------------
 # Generate figures from the stats JSONs produced above
