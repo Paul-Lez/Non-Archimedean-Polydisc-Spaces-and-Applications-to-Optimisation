@@ -1,0 +1,6 @@
+[deps]
+NAML = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+PkgTemplates = "14b8a8f1-9102-5b29-a752-f990bacb7fe1"
+
+[sources]
+NAML = {path = "../naml"}
