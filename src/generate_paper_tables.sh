@@ -30,6 +30,7 @@ EPOCHS_FLAG=""
 SAMPLES_FLAG="--samples 30"
 SELECTION_MODE_FLAG=""
 DEGREE_FLAG=""
+DESCRIPTION=""
 VERBOSE_FLAG=""
 PROCS_FLAG=""
 
@@ -116,6 +117,15 @@ while [ $i -le $# ]; do
             SUITE_FLAGS="$SUITE_FLAGS --paper-dag-mcts-exploration-constant"
             i=$((i+1))
             ;;
+        --description)
+            i=$((i+1))
+            DESCRIPTION="${!i}"
+            i=$((i+1))
+            ;;
+        --description=*)
+            DESCRIPTION="${arg#*=}"
+            i=$((i+1))
+            ;;
         --verbose)
             VERBOSE_FLAG="--verbose"
             i=$((i+1))
@@ -197,7 +207,8 @@ run_pipeline() {
         "$DIR/run_experiments.jl" \
         --save \
         --output "$RAW_PATH" \
-        $SUITE_FLAGS $QUICK_FLAG $EPOCHS_FLAG $SAMPLES_FLAG $SELECTION_MODE_FLAG $DEGREE_FLAG
+        $SUITE_FLAGS $QUICK_FLAG $EPOCHS_FLAG $SAMPLES_FLAG $SELECTION_MODE_FLAG $DEGREE_FLAG \
+        ${DESCRIPTION:+--description "$DESCRIPTION"}
     ok "Raw results: $RAW_PATH"
 
     if [ ! -f "$RAW_PATH" ]; then

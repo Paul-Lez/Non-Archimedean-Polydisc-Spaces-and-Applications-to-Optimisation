@@ -246,7 +246,7 @@ function get_optimizer_configs(config::Dict, args::NamedTuple)
         k = binomial(dim, deg) * prime^deg
         sims_10k = quick ? 200 : 10 * k
 
-        s["Random"] = Dict("init" => (param, loss) -> NAML.random_descent_init(param, loss, 1, (false, 1)))
+        s["Random"] = Dict("init" => (param, loss) -> NAML.random_descent_init(param, loss, 1, (false, deg)))
         s["Best-First"] = Dict("init" => (param, loss) -> NAML.greedy_descent_init(param, loss, 1, (false, deg)))
         s["Best-First-Gradient"] = Dict("init" => (param, loss) -> NAML.gradient_descent_init(param, loss, 1, (false, deg)))
         s["MCTS-10k"] = mk_mcts(sims_10k, deg)
