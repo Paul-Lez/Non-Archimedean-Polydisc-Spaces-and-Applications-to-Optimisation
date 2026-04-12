@@ -7,7 +7,7 @@ The function to minimize is:
 over x ∈ Q₂. The global minimizers are x = ±1 (where f(±1) = 0).
 
 Three optimizers are compared:
-  - Greedy Descent (Best-First)
+  - Best First Value (Best-First)
   - MCTS (Monte Carlo Tree Search)
   - DOO (Deterministic Optimistic Optimization)
 
@@ -66,24 +66,22 @@ function run_optimizer(optim, n_steps)
     best_param = optim.param
     loss_history = Float64[best_loss]
     t_start    = time()
+    l = 0
     for _ in 1:n_steps
         step!(optim)
         l = eval_loss(optim)
-        if l < best_loss
-            best_loss  = l
-            best_param = optim.param
-        end
+        best_loss = min(best_loss, l)
         push!(loss_history, best_loss)
-        has_converged(optim) && break
+        # has_converged(optim) && break
     end
-    return best_loss, best_param, time() - t_start, loss_history
+    return best_loss, optim.param, time() - t_start, loss_history
 end
 
-n_steps = 60
+n_steps = 40
 
-# ── Greedy Descent ─────────────────────────────────────────────────────────────
+# ── Best First Value ─────────────────────────────────────────────────────────────
 
-println("Running Greedy Descent ($n_steps steps)...")
+println("Running Best First Value ($n_steps steps)...")
 greedy_optim = greedy_descent_init(initial_param, loss, 1, (false, 1))
 greedy_loss, greedy_param, greedy_time, greedy_history = run_optimizer(greedy_optim, n_steps)
 
@@ -105,11 +103,10 @@ println("Running DOO ($n_steps steps)...")
 p_val = Float64(p)
 doo_config = DOOConfig(
     delta     = h -> p_val^(-h),
-    max_depth = 15,
     degree    = 1
 )
 doo_optim = doo_descent_init(initial_param, loss, 1, doo_config)
-doo_loss, doo_param, doo_time, doo_history = run_optimizer(doo_optim, 8 * n_steps)
+doo_loss, doo_param, doo_time, doo_history = run_optimizer(doo_optim, n_steps)
 
 # ── Console summary ────────────────────────────────────────────────────────────
 
@@ -121,7 +118,7 @@ println("="^70)
         "Optimizer", "Radius", "Loss", "Time (s)", "Center")
 println("-"^70)
 for (name, lss, prm, t) in [
-        ("Greedy Descent", greedy_loss, greedy_param, greedy_time),
+        ("Best First Value", greedy_loss, greedy_param, greedy_time),
         ("MCTS",           mcts_loss,   mcts_param,   mcts_time),
         ("DOO",            doo_loss,    doo_param,    doo_time)]
     c = NAML.center(prm)[1]
@@ -141,7 +138,7 @@ println(raw"  \toprule")
 println(raw"  Optimizer & Center $c$ & Radius $r$ & Loss $f\!\left(B(c,\,2^{-r})\right)$ & Time\,(s) \\\\")
 println(raw"  \midrule")
 for (name, lss, prm, t) in [
-        ("Greedy Descent", greedy_loss, greedy_param, greedy_time),
+        ("Best First Value", greedy_loss, greedy_param, greedy_time),
         ("MCTS",           mcts_loss,   mcts_param,   mcts_time),
         ("DOO",            doo_loss,    doo_param,    doo_time)]
     c = NAML.center(prm)[1]
@@ -162,9 +159,8 @@ println()
 println("Generating loss curve plot...")
 plt = plot(
     0:length(greedy_history)-1, greedy_history,
-    label="Greedy Descent", linewidth=2, yscale=:log10,
-    xlabel="Epoch", ylabel="Best Loss",
-    title="|x² - 1|₂ Minimization — Loss Curves",
+    label="Best First Value", linewidth=2, yscale=:log10,
+    xlabel="Epoch", ylabel="Loss",
     legend=:topright
 )
 plot!(plt, 0:length(mcts_history)-1, mcts_history, label="MCTS", linewidth=2)

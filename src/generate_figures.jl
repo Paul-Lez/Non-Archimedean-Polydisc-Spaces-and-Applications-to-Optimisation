@@ -61,11 +61,6 @@ end
 const RUN_DIR    = parse_run_dir(ARGS)
 const FIGURE_DIR = joinpath(RUN_DIR, "figures")
 
-"""Pretty title for plot headings."""
-function suite_title(suite::String)
-    replace(suite, "_" => " ") |> titlecase
-end
-
 """Path to a suite's stats JSON inside the run directory."""
 suite_stats_path(suite::String) = joinpath(RUN_DIR, "$(suite)_stats.json")
 
@@ -90,9 +85,7 @@ function load_suite(suite::String)
     experiments, _, _ = load_stats_json(path)
     suites = list_suites(experiments)
     isempty(suites) && error("Stats file has no suites_aggregate entries: $(path)")
-    ablation_suite = first(suites)  # list_suites puts optimizer-comparison first
-    optimizer_order = get_optimizer_names(experiments; suite_name=ablation_suite)
-    return experiments, optimizer_order, ablation_suite
+    return experiments, suites
 end
 
 # ----------------------------------------------------------------------------
@@ -101,34 +94,50 @@ end
 
 function generate_suite_figures(suite::String)
     println("\n=== $(suite) ===")
-    experiments, optimizer_order, ablation_suite = load_suite(suite)
-    title = suite_title(suite)
+    experiments, ablation_suites = load_suite(suite)
 
-    save_figure(
-        generate_ranking_plot_per_experiment(experiments, optimizer_order;
-            title = "$(title): mean rank",
-            suite_name = ablation_suite),
-        figure_path("$(suite)_ranking.png"))
+    results = Tuple[]
+    for ablation_suite in ablation_suites
+        optimizer_order = get_optimizer_names(experiments; suite_name=ablation_suite)
+        println("  Suite: $(ablation_suite)  Optimizers: $(join(optimizer_order, ", "))")
 
-    save_figure(
-        generate_average_final_loss(experiments, optimizer_order;
-            title = "$(title): mean final loss",
-            suite_name = ablation_suite),
-        figure_path("$(suite)_final_loss.png"))
+        save_figure(
+            generate_ranking_plot_per_experiment(experiments, optimizer_order;
+                suite_name = ablation_suite),
+            figure_path("$(suite)_ranking_$(ablation_suite).png"))
 
-    save_figure(
-        generate_number_of_evals_plot(experiments, optimizer_order;
-            title = "$(title): evaluations vs branching factor",
-            suite_name = ablation_suite),
-        figure_path("$(suite)_evals_vs_branching.png"))
+        save_figure(
+            generate_average_final_loss(experiments, optimizer_order;
+                suite_name = ablation_suite),
+            figure_path("$(suite)_final_loss_$(ablation_suite).png"))
 
-    save_figure(
-        generate_times_plot(experiments, optimizer_order;
-            title = "$(title): runtime vs branching factor",
-            suite_name = ablation_suite),
-        figure_path("$(suite)_times_vs_branching.png"))
+        save_figure(
+            generate_number_of_evals_plot(experiments, optimizer_order;
+                suite_name = ablation_suite),
+            figure_path("$(suite)_evals_vs_branching_$(ablation_suite).png"))
 
-    return experiments, optimizer_order, ablation_suite
+        save_figure(
+            generate_times_plot(experiments, optimizer_order;
+                suite_name = ablation_suite),
+            figure_path("$(suite)_times_vs_branching_$(ablation_suite).png"))
+
+        # Per-prime: mean evals and mean runtime vs dimension
+        for p in experiment_primes(experiments)
+            save_figure(
+                generate_evals_by_dimension(experiments, optimizer_order;
+                    prime = p, suite_name = ablation_suite),
+                figure_path("$(suite)_evals_vs_dim_p$(p)_$(ablation_suite).png"))
+
+            save_figure(
+                generate_times_by_dimension(experiments, optimizer_order;
+                    prime = p, suite_name = ablation_suite),
+                figure_path("$(suite)_times_vs_dim_p$(p)_$(ablation_suite).png"))
+        end
+
+        push!(results, (experiments, optimizer_order, ablation_suite))
+    end
+
+    return results
 end
 
 # ----------------------------------------------------------------------------
@@ -153,17 +162,19 @@ end
 
 function generate_cross_suite_figures(per_suite_data)
     println("\n=== overall ===")
-    all_experiments = vcat([exps for (exps, _, _) in per_suite_data]...)
-    optimizer_order = merge_optimizer_orders([order for (_, order, _) in per_suite_data])
-    # Use the first suite's ablation key; all four default-paper suites share
-    # "optimizer-comparison", so this picks the right aggregate block.
-    ablation_suite = per_suite_data[1][3]
+    # Group by ablation suite across all experiment types
+    ablation_names = unique(s for results in per_suite_data for (_, _, s) in results)
+    for ablation_suite in ablation_names
+        matching = [(exps, order) for results in per_suite_data
+                    for (exps, order, s) in results if s == ablation_suite]
+        all_experiments = vcat([exps for (exps, _) in matching]...)
+        optimizer_order = merge_optimizer_orders([order for (_, order) in matching])
 
-    save_figure(
-        generate_overall_ranking_plot(all_experiments, optimizer_order;
-            title = "Overall mean rank across all suites",
-            suite_name = ablation_suite),
-        figure_path("overall_ranking.png"))
+        save_figure(
+            generate_overall_ranking_plot(all_experiments, optimizer_order;
+                suite_name = ablation_suite),
+            figure_path("overall_ranking_$(ablation_suite).png"))
+    end
 end
 
 # ----------------------------------------------------------------------------

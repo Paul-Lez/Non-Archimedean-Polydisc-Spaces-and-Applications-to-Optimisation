@@ -1,7 +1,7 @@
-# Hierarchical Data and Optimisation in Non-Archimedean Spaces — Experiments
+# Non-Archimedean Polydisc Spaces and Applications to Optimisation — Experiments
 
-This repository contains the experiments accompanying the paper *Hierarchical
-Data and Optimisation in Non-Archimedean Spaces*. It is a thin wrapper around
+This repository contains the experiments accompanying the paper *Non-Archimedean Polydisc Spaces and Applications to
+Optimisation*. It is a thin wrapper around
 the [`NAML`](../naml) package, which
 implements the underlying spaces, models, losses, and optimizers. This repo
 provides:
@@ -83,8 +83,8 @@ Each experiment directory follows the same convention:
 | [worked_examples/](src/worked_examples/)                     | Small hand-crafted examples (`x² − 1`, a cubic sum, …)         |
 
 All four benchmarks compare the same family of optimizers from `NAML`
-(random search, best-first / greedy, MCTS and DAG-MCTS variants, HOO/DOO,
-gradient-style baselines, …) on problems with inputs and parameters in a
+(random search, best-first, MCTS and DAG-MCTS variants, DOO,
+best-first with gradient, …) on problems with inputs and parameters in a
 non-Archimedean polydisc space.
 
 ## Running the experiments

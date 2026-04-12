@@ -36,22 +36,22 @@ const DISPLAY_NAMES = Dict(
     "Best-First-branch2"  => "Best First Branch 2",
     "Best-First-Gradient" => "Best First Gradient",
     "DOO"                 => "DOO",
-    "MCTS-k"              => "MCTS-\$k\$",
-    "MCTS-5k"             => "MCTS-\$5k\$",
-    "MCTS-10k"            => "MCTS-\$10k\$",
-    "DAG-MCTS-k"          => "DAG-MCTS-\$k\$",
-    "DAG-MCTS-5k"         => "DAG-MCTS-\$5k\$",
-    "DAG-MCTS-10k"        => "DAG-MCTS-\$10k\$",
+    "MCTS-k"              => "MCTS-\$b\$",
+    "MCTS-5k"             => "MCTS-\$5b\$",
+    "MCTS-10k"            => "MCTS-\$10b\$",
+    "DAG-MCTS-k"          => "DAG-MCTS-\$b\$",
+    "DAG-MCTS-5k"         => "DAG-MCTS-\$5b\$",
+    "DAG-MCTS-10k"        => "DAG-MCTS-\$10b\$",
 
     # New suite-based names
-    "MCTS-10k-deg1"       => "MCTS-\$10k\$ (deg 1)",
-    "MCTS-10k-deg2"       => "MCTS-\$10k\$ (deg 2)",
-    "DAG-MCTS-10k-deg1"   => "DAG-MCTS-\$10k\$ (deg 1)",
-    "DAG-MCTS-10k-deg2"   => "DAG-MCTS-\$10k\$ (deg 2)",
-    "Greedy-deg1"         => "Greedy (deg 1)",
-    "Greedy-deg2"         => "Greedy (deg 2)",
-    "Gradient-deg1"       => "Gradient (deg 1)",
-    "Gradient-deg2"       => "Gradient (deg 2)",
+    "MCTS-10k-deg1"       => "MCTS-\$10b\$ (deg 1)",
+    "MCTS-10k-deg2"       => "MCTS-\$10b\$ (deg 2)",
+    "DAG-MCTS-10k-deg1"   => "DAG-MCTS-\$10b\$ (deg 1)",
+    "DAG-MCTS-10k-deg2"   => "DAG-MCTS-\$10b\$ (deg 2)",
+    "Greedy-deg1"         => "Best First Value (deg 1)",
+    "Greedy-deg2"         => "Best First Value (deg 2)",
+    "Gradient-deg1"       => "Best First Gradient (deg 1)",
+    "Gradient-deg2"       => "Best First Gradient (deg 2)",
 )
 display_name(n) = get(DISPLAY_NAMES, n, n)
 
@@ -198,6 +198,93 @@ function mean_metric_across_experiments(experiments, optimizer_order::AbstractVe
         opt => counts[opt] > 0 ? sums[opt] / counts[opt] : NaN
         for opt in optimizer_order
     )
+end
+
+"""
+    mean_and_std_metric_across_experiments(experiments, optimizer_order, extractor;
+                                           suite_name=nothing) -> (means, stds)
+
+Like `mean_metric_across_experiments`, but also returns the standard deviation
+of the per-experiment values. Both `means` and `stds` are
+`Dict{Any,Float64}`; optimizers with no data map to `NaN`.
+"""
+function mean_and_std_metric_across_experiments(experiments,
+                                                optimizer_order::AbstractVector,
+                                                extractor; suite_name=nothing)
+    vals = Dict{Any,Vector{Float64}}(opt => Float64[] for opt in optimizer_order)
+
+    for exp in experiments
+        agg = experiment_aggregate(exp; suite_name=suite_name)
+        agg === nothing && continue
+        for opt in optimizer_order
+            opt_stats = get(agg, opt, nothing)
+            v = extractor(opt_stats)
+            v === nothing && continue
+            push!(vals[opt], v)
+        end
+    end
+
+    means = Dict{Any,Float64}(
+        opt => isempty(vals[opt]) ? NaN : _mean(vals[opt])
+        for opt in optimizer_order
+    )
+    stds = Dict{Any,Float64}(
+        opt => length(vals[opt]) > 1 ? _std(vals[opt]) : NaN
+        for opt in optimizer_order
+    )
+    return means, stds
+end
+
+"""
+    mean_metric_by_dimension(experiments, optimizer_order, extractor;
+                             prime::Int, suite_name=nothing)
+        -> Dict{String, Vector{Tuple{Int,Float64}}}
+
+For each optimizer, group experiments whose config has the given `prime` by
+dimension (`config_dimension`) and average `extractor(opt_stats)` within each
+group. Returned vectors are sorted by dimension.
+"""
+function mean_metric_by_dimension(experiments,
+                                  optimizer_order::AbstractVector,
+                                  extractor;
+                                  prime::Int,
+                                  suite_name=nothing)
+    buckets = Dict{Any, Dict{Int, Vector{Float64}}}(
+        opt => Dict{Int, Vector{Float64}}() for opt in optimizer_order
+    )
+
+    for exp in experiments
+        agg = experiment_aggregate(exp; suite_name=suite_name)
+        agg === nothing && continue
+        haskey(exp, "config") || continue
+        Int(exp["config"]["prime"]) == prime || continue
+        dim = config_dimension(exp["config"])
+        for opt in optimizer_order
+            v = extractor(get(agg, opt, nothing))
+            v === nothing && continue
+            push!(get!(buckets[opt], dim, Float64[]), v)
+        end
+    end
+
+    return Dict{Any, Vector{Tuple{Int,Float64}}}(
+        opt => sort([(dim, _mean(vs)) for (dim, vs) in buckets[opt]], by=first)
+        for opt in optimizer_order
+    )
+end
+
+"""
+    experiment_primes(experiments) -> Vector{Int}
+
+Return the sorted list of distinct primes across all experiment configs.
+"""
+function experiment_primes(experiments)
+    primes = Set{Int}()
+    for exp in experiments
+        haskey(exp, "config") || continue
+        haskey(exp["config"], "prime") || continue
+        push!(primes, Int(exp["config"]["prime"]))
+    end
+    return sort(collect(primes))
 end
 
 """

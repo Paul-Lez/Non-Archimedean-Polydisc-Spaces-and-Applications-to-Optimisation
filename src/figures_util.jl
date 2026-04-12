@@ -20,7 +20,7 @@ include(joinpath(@__DIR__, "stats_utils.jl"))
 # ============================================================================
 
 """Half an A4 page (210mm wide) at ≈100 dpi."""
-const FIGURE_SIZE             = (420, 300)
+const FIGURE_SIZE             = (520, 400)
 
 """Pastel categorical palette for optimizers. Swap to taste."""
 const FIGURE_PALETTE          = palette(:Pastel1)
@@ -28,20 +28,20 @@ const FIGURE_PALETTE          = palette(:Pastel1)
 const FIGURE_BACKGROUND       = :white
 const FIGURE_GRID_COLOR       = :gray85
 const FIGURE_FONT_FAMILY      = "Helvetica"
-const FIGURE_TITLE_FONT_SIZE  = 10
 const FIGURE_GUIDE_FONT_SIZE  = 9
 const FIGURE_TICK_FONT_SIZE   = 7
 const FIGURE_LEGEND_FONT_SIZE = 7
 
+"""Show ±1 std-dev error bars on bar charts."""
+const FIGURE_SHOW_ERROR_BARS  = false
+
 """Common keyword arguments applied to every figure."""
-function _base_attrs(; title::String="")
+function _base_attrs()
     return (
         size              = FIGURE_SIZE,
-        title             = title,
         background_color  = FIGURE_BACKGROUND,
         gridcolor         = FIGURE_GRID_COLOR,
         fontfamily        = FIGURE_FONT_FAMILY,
-        titlefontsize     = FIGURE_TITLE_FONT_SIZE,
         guidefontsize     = FIGURE_GUIDE_FONT_SIZE,
         tickfontsize      = FIGURE_TICK_FONT_SIZE,
         legendfontsize    = FIGURE_LEGEND_FONT_SIZE,
@@ -65,32 +65,73 @@ figure_label(name) = replace(display_name(name), "\$" => "")
 # ============================================================================
 
 """
-    _bar_per_optimizer(values::Dict, optimizer_order; ylabel, title, yscale)
+    _bar_per_optimizer(values::Dict, optimizer_order; ylabel, yscale, stds)
 
 Render a bar chart with one bar per optimizer that has data. Optimizers are
 plotted in `optimizer_order`; those whose value is `NaN` are skipped.
+
+When `stds` is provided (a `Dict` matching `values`), error bars showing ±1
+standard deviation are drawn on each bar.
 """
 function _bar_per_optimizer(values::AbstractDict,
                             optimizer_order::AbstractVector;
                             ylabel::String,
-                            title::String="",
-                            yscale::Symbol=:identity)
+                            yscale::Symbol=:identity,
+                            stds::Union{AbstractDict,Nothing}=nothing)
     present = [opt for opt in optimizer_order if !isnan(values[opt])]
-    isempty(present) && return plot(; _base_attrs(title="$(title) (no data)")...)
+    isempty(present) && return plot(; _base_attrs()...)
 
     heights = [values[opt] for opt in present]
     labels  = [figure_label(opt) for opt in present]
     colors  = [_optimizer_color(i) for i in eachindex(present)]
 
-    return bar(
+    # Build error-bar vector: use the std when available, 0 otherwise.
+    errs = if stds !== nothing
+        [isnan(get(stds, opt, NaN)) ? 0.0 : stds[opt] for opt in present]
+    else
+        zeros(length(present))
+    end
+
+    # Add headroom above the tallest bar+error so it doesn't touch the frame.
+    ymax = maximum(heights[i] + errs[i] for i in eachindex(heights))
+    ylims_kw = if yscale == :log10
+        ymin = minimum(h for h in heights if h > 0)
+        (ymin * 0.5, ymax * 2.0)
+    else
+        (0, ymax * 1.1)
+    end
+
+    plt = bar(
         labels, heights;
-        ylabel    = ylabel,
-        xrotation = 45,
-        legend    = false,
-        color     = colors,
-        yscale    = yscale,
-        _base_attrs(title=title)...
+        ylabel        = ylabel,
+        xrotation     = 45,
+        legend        = false,
+        color         = colors,
+        yscale        = yscale,
+        ylims         = ylims_kw,
+        bottom_margin = 12Plots.mm,
+        _base_attrs()...
     )
+
+    # Overlay error bars as a scatter series so they are centred on the mean.
+    # Plots.jl bar charts use the same categorical labels as x-coordinates.
+    # On log-scale axes, clamp the lower whisker so it never goes non-positive.
+    if any(e -> e > 0, errs)
+        whiskers = if yscale == :log10
+            # Asymmetric error bars: (lower, upper) per point.
+            [(min(e, h - h * 0.01), e) for (h, e) in zip(heights, errs)]
+        else
+            errs
+        end
+        scatter!(plt, labels, heights;
+                 yerror      = whiskers,
+                 markersize  = 0,
+                 markercolor = :black,
+                 linecolor   = :black,
+                 label       = false)
+    end
+
+    return plt
 end
 
 """
@@ -103,7 +144,6 @@ pairs as produced by `mean_metric_by_branching_factor`.
 function _lines_by_branching_factor(series::AbstractDict,
                                     optimizer_order::AbstractVector;
                                     ylabel::String,
-                                    title::String="",
                                     yscale::Symbol=:identity)
     plt = plot(;
         xlabel = "Branching factor",
@@ -111,7 +151,7 @@ function _lines_by_branching_factor(series::AbstractDict,
         xscale = :log10,
         yscale = yscale,
         legend = :outerright,
-        _base_attrs(title=title)...
+        _base_attrs()...
     )
 
     for (i, opt) in enumerate(optimizer_order)
@@ -143,13 +183,20 @@ Lower is better.
 """
 function generate_ranking_plot_per_experiment(experiments,
                                               optimizer_order::AbstractVector;
-                                              title::String="",
                                               suite_name=nothing)
-    means = mean_metric_across_experiments(experiments, optimizer_order,
-                s -> optimizer_metric(s, "mean_rank"); suite_name=suite_name)
-    return _bar_per_optimizer(means, optimizer_order;
-        ylabel = "Mean rank",
-        title  = title)
+    if FIGURE_SHOW_ERROR_BARS
+        means, stds = mean_and_std_metric_across_experiments(experiments, optimizer_order,
+                          s -> optimizer_metric(s, "mean_rank"); suite_name=suite_name)
+    else
+        means = mean_metric_across_experiments(experiments, optimizer_order,
+                    s -> optimizer_metric(s, "mean_rank"); suite_name=suite_name)
+        stds = nothing
+    end
+    plt = _bar_per_optimizer(means, optimizer_order;
+        ylabel = "Mean rank", stds = stds)
+    ymax = ceil(Int, last(ylims(plt)))
+    plot!(plt; yticks = 0:ymax)
+    return plt
 end
 
 """
@@ -160,14 +207,19 @@ Plotted on a log scale because losses span many orders of magnitude.
 """
 function generate_average_final_loss(experiments,
                                      optimizer_order::AbstractVector;
-                                     title::String="",
                                      suite_name=nothing)
-    means = mean_metric_across_experiments(experiments, optimizer_order,
-                s -> optimizer_metric(s, "mean_final_loss"); suite_name=suite_name)
+    if FIGURE_SHOW_ERROR_BARS
+        means, stds = mean_and_std_metric_across_experiments(experiments, optimizer_order,
+                          s -> optimizer_metric(s, "mean_final_loss"); suite_name=suite_name)
+    else
+        means = mean_metric_across_experiments(experiments, optimizer_order,
+                    s -> optimizer_metric(s, "mean_final_loss"); suite_name=suite_name)
+        stds = nothing
+    end
     return _bar_per_optimizer(means, optimizer_order;
         ylabel = "Mean final loss",
-        title  = title,
-        yscale = :log10)
+        yscale = :log10,
+        stds   = stds)
 end
 
 """
@@ -178,13 +230,11 @@ branching factor. Y-axis is log-scaled because eval counts span many orders.
 """
 function generate_number_of_evals_plot(experiments,
                                        optimizer_order::AbstractVector;
-                                       title::String="",
                                        suite_name=nothing)
     series = mean_metric_by_branching_factor(experiments, optimizer_order,
                 s -> optimizer_metric(s, "mean_total_evals"); suite_name=suite_name)
     return _lines_by_branching_factor(series, optimizer_order;
         ylabel = "Mean function evaluations",
-        title  = title,
         yscale = :log10)
 end
 
@@ -196,13 +246,86 @@ factor.
 """
 function generate_times_plot(experiments,
                              optimizer_order::AbstractVector;
-                             title::String="",
                              suite_name=nothing)
     series = mean_metric_by_branching_factor(experiments, optimizer_order,
                 s -> optimizer_metric(s, "mean_time"); suite_name=suite_name)
     return _lines_by_branching_factor(series, optimizer_order;
         ylabel = "Mean runtime (s)",
-        title  = title,
+        yscale = :log10)
+end
+
+# ============================================================================
+# Per-prime plots (metric vs dimension)
+# ============================================================================
+
+"""
+    _lines_by_dimension(series::Dict, optimizer_order; ylabel, yscale)
+
+One line per optimizer; x-axis is polydisc dimension, y-axis is the supplied
+metric. Each entry in `series` is a sorted vector of `(dimension, value)`
+pairs as produced by `mean_metric_by_dimension`.
+"""
+function _lines_by_dimension(series::AbstractDict,
+                             optimizer_order::AbstractVector;
+                             ylabel::String,
+                             yscale::Symbol=:identity)
+    plt = plot(;
+        xlabel = "Dimension",
+        ylabel = ylabel,
+        yscale = yscale,
+        legend = :outerright,
+        _base_attrs()...
+    )
+
+    for (i, opt) in enumerate(optimizer_order)
+        pts = get(series, opt, Tuple{Int,Float64}[])
+        pts = filter(p -> p[2] > 0, pts)
+        isempty(pts) && continue
+        xs = Float64[p[1] for p in pts]
+        ys = Float64[p[2] for p in pts]
+        plot!(plt, xs, ys;
+              label  = figure_label(opt),
+              marker = :circle,
+              color  = _optimizer_color(i),
+              linewidth = 1.5,
+              markersize = 4)
+    end
+    return plt
+end
+
+"""
+    generate_evals_by_dimension(experiments, optimizer_order; prime, suite_name)
+
+Line plot — one line per optimizer — of mean function-evaluation count vs
+dimension, filtered to configs with the given `prime`.
+"""
+function generate_evals_by_dimension(experiments,
+                                     optimizer_order::AbstractVector;
+                                     prime::Int,
+                                     suite_name=nothing)
+    series = mean_metric_by_dimension(experiments, optimizer_order,
+                s -> optimizer_metric(s, "mean_total_evals");
+                prime=prime, suite_name=suite_name)
+    return _lines_by_dimension(series, optimizer_order;
+        ylabel = "Mean function evaluations",
+        yscale = :log10)
+end
+
+"""
+    generate_times_by_dimension(experiments, optimizer_order; prime, suite_name)
+
+Line plot — one line per optimizer — of mean wall-clock runtime vs dimension,
+filtered to configs with the given `prime`.
+"""
+function generate_times_by_dimension(experiments,
+                                     optimizer_order::AbstractVector;
+                                     prime::Int,
+                                     suite_name=nothing)
+    series = mean_metric_by_dimension(experiments, optimizer_order,
+                s -> optimizer_metric(s, "mean_time");
+                prime=prime, suite_name=suite_name)
+    return _lines_by_dimension(series, optimizer_order;
+        ylabel = "Mean runtime (s)",
         yscale = :log10)
 end
 
@@ -218,13 +341,20 @@ experiment suites' configurations.
 """
 function generate_overall_ranking_plot(all_experiments,
                                        optimizer_order::AbstractVector;
-                                       title::String="Overall mean rank",
                                        suite_name=nothing)
-    means = mean_metric_across_experiments(all_experiments, optimizer_order,
-                s -> optimizer_metric(s, "mean_rank"); suite_name=suite_name)
-    return _bar_per_optimizer(means, optimizer_order;
-        ylabel = "Mean rank",
-        title  = title)
+    if FIGURE_SHOW_ERROR_BARS
+        means, stds = mean_and_std_metric_across_experiments(all_experiments, optimizer_order,
+                          s -> optimizer_metric(s, "mean_rank"); suite_name=suite_name)
+    else
+        means = mean_metric_across_experiments(all_experiments, optimizer_order,
+                    s -> optimizer_metric(s, "mean_rank"); suite_name=suite_name)
+        stds = nothing
+    end
+    plt = _bar_per_optimizer(means, optimizer_order;
+        ylabel = "Mean rank", stds = stds)
+    ymax = ceil(Int, last(ylims(plt)))
+    plot!(plt; yticks = 0:ymax)
+    return plt
 end
 
 # ============================================================================
@@ -239,6 +369,7 @@ inferred from the extension by Plots.jl.
 """
 function save_figure(plt, path::String)
     mkpath(dirname(path))
+    plot!(plt; size = FIGURE_SIZE)          # enforce consistent dimensions
     savefig(plt, path)
     println("✓ Wrote $path")
     return path
