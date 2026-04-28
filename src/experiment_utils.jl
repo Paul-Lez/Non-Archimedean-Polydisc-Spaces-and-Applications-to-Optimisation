@@ -1,5 +1,5 @@
 """
-Shared experiment utilities for the NAML paper experiment infrastructure.
+Shared experiment utilities for the experiment infrastructure.
 
 Provides:
 1. Unified CLI argument parsing
@@ -17,6 +17,11 @@ using JSON
 using Printf
 using Dates
 using Random
+
+const DEFAULT_EPOCHS = 120
+const DEFAULT_SAMPLES = 50
+const QUICK_EPOCHS = 5
+const QUICK_SAMPLES = 5
 
 # ============================================================================
 # CLI Argument Parsing
@@ -61,11 +66,11 @@ function parse_experiment_args(args)
                       use_gradient_branching || use_mcts_sims || 
                       use_dag_mcts_sims || use_mcts_exp || use_dag_mcts_exp
 
-    # Default epochs
-    n_epochs = quick_mode ? 5 : 20
+    # Default run sizes
+    n_epochs = quick_mode ? QUICK_EPOCHS : DEFAULT_EPOCHS
 
     output_filename = nothing
-    n_samples_override = nothing
+    n_samples_override = quick_mode ? QUICK_SAMPLES : DEFAULT_SAMPLES
     selection_mode = NAML.BestValue
     mcts_degree_override = nothing
     description = ""
@@ -154,13 +159,10 @@ function load_configs(args, default_configs::Vector)
         default_configs
     end
 
-    # Apply samples override
-    if !isnothing(args.n_samples_override)
-        for config in configs
-            config["num_samples"] = args.n_samples_override
-        end
-        println("Overriding num_samples to $(args.n_samples_override) for all configs")
+    for config in configs
+        config["num_samples"] = args.n_samples_override
     end
+    println("Using $(args.n_samples_override) samples per config")
 
     return configs
 end

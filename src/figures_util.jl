@@ -171,6 +171,49 @@ function _lines_by_branching_factor(series::AbstractDict,
     return plt
 end
 
+"""
+    _lines_categorical(series::Dict, optimizer_order; xlabel, ylabel, yscale)
+
+One line per optimizer; x-axis values from `series` are mapped to evenly-spaced
+integer positions (categorical axis). Each entry in `series` is a sorted vector
+of `(x_value, y_value)` pairs. Tick labels show the original x values.
+"""
+function _lines_categorical(series::AbstractDict,
+                            optimizer_order::AbstractVector;
+                            xlabel::String,
+                            ylabel::String,
+                            yscale::Symbol=:identity)
+    # Collect all x values across optimizers
+    all_xs = sort(collect(Set(
+        p[1] for opt in optimizer_order
+              for p in get(series, opt, Tuple{Int,Float64}[])
+    )))
+    x_to_idx = Dict(x => i for (i, x) in enumerate(all_xs))
+
+    plt = plot(;
+        xlabel = xlabel,
+        ylabel = ylabel,
+        yscale = yscale,
+        legend = :outerright,
+        xticks = (1:length(all_xs), string.(all_xs)),
+        _base_attrs()...
+    )
+
+    for (i, opt) in enumerate(optimizer_order)
+        pts = get(series, opt, Tuple{Int,Float64}[])
+        isempty(pts) && continue
+        xs = Float64[x_to_idx[p[1]] for p in pts]
+        ys = Float64[p[2] for p in pts]
+        plot!(plt, xs, ys;
+              label  = figure_label(opt),
+              marker = :circle,
+              color  = _optimizer_color(i),
+              linewidth = 1.5,
+              markersize = 4)
+    end
+    return plt
+end
+
 # ============================================================================
 # Per-experiment-suite plots
 # ============================================================================
@@ -203,7 +246,8 @@ end
     generate_average_final_loss(experiments, optimizer_order; title)
 
 Bar plot of the mean final loss of each optimizer across one experiment suite.
-Plotted on a log scale because losses span many orders of magnitude.
+For non-function-learning experiments, `mean_final_loss` is already on the
+log_p scale so a linear y-axis is used; the values represent log_p(loss).
 """
 function generate_average_final_loss(experiments,
                                      optimizer_order::AbstractVector;
@@ -217,8 +261,7 @@ function generate_average_final_loss(experiments,
         stds = nothing
     end
     return _bar_per_optimizer(means, optimizer_order;
-        ylabel = "Mean final loss",
-        yscale = :log10,
+        ylabel = "log_p(mean final loss)",
         stds   = stds)
 end
 
@@ -327,6 +370,46 @@ function generate_times_by_dimension(experiments,
     return _lines_by_dimension(series, optimizer_order;
         ylabel = "Mean runtime (s)",
         yscale = :log10)
+end
+
+# ============================================================================
+# Loss vs prime / loss vs dimension (categorical x-axis)
+# ============================================================================
+
+"""
+    generate_loss_vs_prime(experiments, optimizer_order; suite_name)
+
+Line plot — one line per optimizer — of mean final loss vs prime. The y-axis
+shows `mean_final_loss` which is already on the log_p scale (computed during
+aggregation in `compute_aggregate_stats`). The x-axis is categorical (evenly
+spaced primes).
+"""
+function generate_loss_vs_prime(experiments,
+                                optimizer_order::AbstractVector;
+                                suite_name=nothing)
+    series = mean_metric_by_prime(experiments, optimizer_order,
+                s -> optimizer_metric(s, "mean_final_loss");
+                suite_name=suite_name)
+    return _lines_categorical(series, optimizer_order;
+        xlabel = "Prime", ylabel = "log_p(mean final loss)")
+end
+
+"""
+    generate_loss_vs_dimension(experiments, optimizer_order; suite_name)
+
+Line plot — one line per optimizer — of mean final loss vs dimension (averaged
+across all primes). The y-axis shows `mean_final_loss` which is already on the
+log_p scale (computed during aggregation in `compute_aggregate_stats`). The
+x-axis is categorical (evenly spaced dimensions).
+"""
+function generate_loss_vs_dimension(experiments,
+                                    optimizer_order::AbstractVector;
+                                    suite_name=nothing)
+    series = mean_metric_by_dimension_all_primes(experiments, optimizer_order,
+                s -> optimizer_metric(s, "mean_final_loss");
+                suite_name=suite_name)
+    return _lines_categorical(series, optimizer_order;
+        xlabel = "Dimension", ylabel = "log_p(mean final loss)")
 end
 
 # ============================================================================

@@ -12,8 +12,8 @@
 #
 # Flags:
 #   --quick           Reduced epochs/simulations for smoke testing
-#   --epochs N        Override epochs (default: 20)
-#   --samples N       Override samples per config (default: 30)
+#   --epochs N        Override epochs (default: 120)
+#   --samples N       Override samples per config (default: 50)
 #   --selection-mode  MCTS/DAG-MCTS selection mode (default: BestValue)
 #   --degree D        Override tree branching degree (default: auto)
 #   --verbose         Include per-configuration detailed tables
@@ -27,7 +27,7 @@ set -euo pipefail
 # ----------------------------------------------------------------------------
 QUICK_FLAG=""
 EPOCHS_FLAG=""
-SAMPLES_FLAG="--samples 30"
+SAMPLES_FLAG=""
 SELECTION_MODE_FLAG=""
 DEGREE_FLAG=""
 DESCRIPTION=""

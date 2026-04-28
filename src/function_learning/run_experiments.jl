@@ -35,7 +35,8 @@ end
 
 # Synchronize dependencies on all workers
 @everywhere using Oscar
-@everywhere using NAML
+@everywhere using NonArchimedeanMachineLearning
+@everywhere const NAML = NonArchimedeanMachineLearning
 @everywhere begin
     using Random, Dates, Printf
     include(joinpath(@__DIR__, "../util.jl"))

@@ -273,6 +273,76 @@ function mean_metric_by_dimension(experiments,
 end
 
 """
+    mean_metric_by_prime(experiments, optimizer_order, extractor;
+                         suite_name=nothing)
+        -> Dict{Any, Vector{Tuple{Int,Float64}}}
+
+For each optimizer, group experiments by prime and average
+`extractor(opt_stats)` within each group. Returned vectors are sorted by
+prime.
+"""
+function mean_metric_by_prime(experiments,
+                              optimizer_order::AbstractVector,
+                              extractor;
+                              suite_name=nothing)
+    buckets = Dict{Any, Dict{Int, Vector{Float64}}}(
+        opt => Dict{Int, Vector{Float64}}() for opt in optimizer_order
+    )
+
+    for exp in experiments
+        agg = experiment_aggregate(exp; suite_name=suite_name)
+        agg === nothing && continue
+        haskey(exp, "config") || continue
+        haskey(exp["config"], "prime") || continue
+        prime = Int(exp["config"]["prime"])
+        for opt in optimizer_order
+            v = extractor(get(agg, opt, nothing))
+            v === nothing && continue
+            push!(get!(buckets[opt], prime, Float64[]), v)
+        end
+    end
+
+    return Dict{Any, Vector{Tuple{Int,Float64}}}(
+        opt => sort([(p, _mean(vs)) for (p, vs) in buckets[opt]], by=first)
+        for opt in optimizer_order
+    )
+end
+
+"""
+    mean_metric_by_dimension_all_primes(experiments, optimizer_order, extractor;
+                                        suite_name=nothing)
+        -> Dict{Any, Vector{Tuple{Int,Float64}}}
+
+Like `mean_metric_by_dimension`, but averaged across *all* primes rather than
+filtered to a single one. Returned vectors are sorted by dimension.
+"""
+function mean_metric_by_dimension_all_primes(experiments,
+                                             optimizer_order::AbstractVector,
+                                             extractor;
+                                             suite_name=nothing)
+    buckets = Dict{Any, Dict{Int, Vector{Float64}}}(
+        opt => Dict{Int, Vector{Float64}}() for opt in optimizer_order
+    )
+
+    for exp in experiments
+        agg = experiment_aggregate(exp; suite_name=suite_name)
+        agg === nothing && continue
+        haskey(exp, "config") || continue
+        dim = config_dimension(exp["config"])
+        for opt in optimizer_order
+            v = extractor(get(agg, opt, nothing))
+            v === nothing && continue
+            push!(get!(buckets[opt], dim, Float64[]), v)
+        end
+    end
+
+    return Dict{Any, Vector{Tuple{Int,Float64}}}(
+        opt => sort([(dim, _mean(vs)) for (dim, vs) in buckets[opt]], by=first)
+        for opt in optimizer_order
+    )
+end
+
+"""
     experiment_primes(experiments) -> Vector{Int}
 
 Return the sorted list of distinct primes across all experiment configs.
@@ -361,13 +431,20 @@ end
 
 """
     compute_aggregate_stats(samples_in_suite::Vector{Dict}, suite_name::String;
-                            extra_fields::Vector{String}=String[]) -> Dict
+                            extra_fields::Vector{String}=String[],
+                            log_prime::Union{Int,Nothing}=nothing) -> Dict
 
 Compute aggregate statistics across samples for a specific suite.
 `samples_in_suite` is a Vector of optimizer results for this suite (one per sample).
+
+When `log_prime` is provided, final-loss statistics (`mean_final_loss`,
+`std_final_loss`, `min_final_loss`, `max_final_loss`) are computed on the
+log_p scale: each sample's `final_loss` is mapped to `log(loss)/log(prime)`
+before aggregation. This normalises losses across different primes.
 """
 function compute_aggregate_stats(samples_in_suite::AbstractVector, suite_name::String;
-                                  extra_fields::AbstractVector=String[])
+                                  extra_fields::AbstractVector=String[],
+                                  log_prime::Union{Int,Nothing}=nothing)
     if isempty(samples_in_suite)
         return Dict("error" => "No samples in suite")
     end
@@ -394,11 +471,19 @@ function compute_aggregate_stats(samples_in_suite::AbstractVector, suite_name::S
         end
 
         if !isempty(opt_data)
-            final_losses = [d["final_loss"] for d in opt_data]
+            raw_losses = [d["final_loss"] for d in opt_data]
+            # When log_prime is set, aggregate on the log_p scale so that
+            # losses from different primes are comparable.
+            final_losses = if log_prime !== nothing
+                [log(l) / log(log_prime) for l in raw_losses if l > 0]
+            else
+                raw_losses
+            end
+            isempty(final_losses) && continue
 
             agg = Dict{String, Any}(
                 "mean_final_loss" => _mean(final_losses),
-                "std_final_loss" => length(opt_data) > 1 ? _std(final_losses) : 0.0,
+                "std_final_loss" => length(final_losses) > 1 ? _std(final_losses) : 0.0,
                 "min_final_loss" => minimum(final_losses),
                 "max_final_loss" => maximum(final_losses),
                 "mean_improvement" => _mean([d["improvement"] for d in opt_data]),

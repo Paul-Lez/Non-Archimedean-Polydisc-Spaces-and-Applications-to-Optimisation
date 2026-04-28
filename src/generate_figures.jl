@@ -40,6 +40,8 @@ const SUITES = [
     "polynomial_solving",
 ]
 
+"""Suites where raw loss is plotted instead of log_p(loss)."""
+
 """
     parse_run_dir(args) -> String
 
@@ -120,6 +122,20 @@ function generate_suite_figures(suite::String)
             generate_times_plot(experiments, optimizer_order;
                 suite_name = ablation_suite),
             figure_path("$(suite)_times_vs_branching_$(ablation_suite).png"))
+
+        # Loss vs prime and loss vs dimension (categorical x-axis)
+        # mean_final_loss is already log_p-normalised for non-function-learning
+        # experiments (done in compute_aggregate_stats), so no extra transform needed.
+
+        save_figure(
+            generate_loss_vs_prime(experiments, optimizer_order;
+                suite_name = ablation_suite),
+            figure_path("$(suite)_loss_vs_prime_$(ablation_suite).png"))
+
+        save_figure(
+            generate_loss_vs_dimension(experiments, optimizer_order;
+                suite_name = ablation_suite),
+            figure_path("$(suite)_loss_vs_dimension_$(ablation_suite).png"))
 
         # Per-prime: mean evals and mean runtime vs dimension
         for p in experiment_primes(experiments)

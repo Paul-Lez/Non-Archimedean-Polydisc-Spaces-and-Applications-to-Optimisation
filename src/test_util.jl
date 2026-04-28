@@ -10,10 +10,11 @@ Pkg.activate(joinpath(@__DIR__, ".."))
 include("util.jl")
 
 using Oscar
-using NAML
+using NonArchimedeanMachineLearning
+const NAML = NonArchimedeanMachineLearning
 
 println("="^60)
-println("Testing NAML Utility Functions")
+println("Testing NonArchimedeanMachineLearning Utility Functions")
 println("="^60)
 
 # Setup

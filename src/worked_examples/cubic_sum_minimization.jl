@@ -20,7 +20,8 @@ Usage:
 using Pkg
 Pkg.activate(joinpath(@__DIR__, "..", ".."))
 
-using NAML
+using NonArchimedeanMachineLearning
+const NAML = NonArchimedeanMachineLearning
 using Oscar
 using Printf
 using Random

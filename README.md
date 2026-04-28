@@ -1,9 +1,9 @@
 # Non-Archimedean Polydisc Spaces and Applications to Optimisation — Experiments
 
 This repository contains the experiments accompanying the paper *Non-Archimedean Polydisc Spaces and Applications to
-Optimisation*. It is a thin wrapper around
-the [`NAML`](../naml) package, which
-implements the underlying spaces, models, losses, and optimizers. This repo
+Optimisation*. It uses the Julia package
+`NonArchimedeanMachineLearning.jl`, which implements the underlying spaces,
+models, losses, and optimizers. This repo
 provides:
 
 - runnable experiment scripts for each benchmark in the paper,
@@ -16,15 +16,8 @@ provides:
 ### Prerequisites
 
 - Julia 1.10 or later.
-- A local checkout of the [`NAML`](../naml) package. This repository expects
-  to find it at `../naml` relative to this repo (see
-  [Project.toml](Project.toml)):
-
-  ```
-  ParentDir/
-  ├── naml/                                                    # the NAML package
-  └── Hierarchical-Data-and-Optimisation-in-Non-Archimedean-Spaces/   # this repo
-  ```
+- Access to install the Julia dependencies listed in [Project.toml](Project.toml),
+  including `NonArchimedeanMachineLearning.jl`.
 
 ### Setup
 
@@ -34,8 +27,8 @@ From the root of this repo:
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
-This will pick up `NAML` from `../naml` and install all remaining
-dependencies listed in [Project.toml](Project.toml).
+This will install the dependencies listed in [Project.toml](Project.toml),
+including `NonArchimedeanMachineLearning.jl`.
 
 To verify the setup, run a quick smoke test of the full pipeline:
 
@@ -82,7 +75,8 @@ Each experiment directory follows the same convention:
 | [polynomial_solving/](src/polynomial_solving/)               | Minimise `|f(z)|` for a polynomial `f` with a guaranteed root  |
 | [worked_examples/](src/worked_examples/)                     | Small hand-crafted examples (`x² − 1`, a cubic sum, …)         |
 
-All four benchmarks compare the same family of optimizers from `NAML`
+All four benchmarks compare the same family of optimizers from
+`NonArchimedeanMachineLearning.jl`
 (random search, best-first, MCTS and DAG-MCTS variants, DOO,
 best-first with gradient, …) on problems with inputs and parameters in a
 non-Archimedean polydisc space.
@@ -112,8 +106,8 @@ Useful flags (all forwarded to the underlying `run_experiments.jl` calls):
 | Flag                      | Meaning                                                   |
 |---------------------------|-----------------------------------------------------------|
 | `--quick`                 | Reduced epochs/samples — smoke test                       |
-| `--epochs N`              | Override number of epochs (default: 20)                   |
-| `--samples N`             | Override samples per configuration (default: 30)          |
+| `--epochs N`              | Override number of epochs (default: 120)                  |
+| `--samples N`             | Override samples per configuration (default: 50)          |
 | `--selection-mode M`      | MCTS/DAG-MCTS selection: `BestValue`, `VisitCount`, `BestLoss` |
 | `--degree D`              | Override tree branching degree                            |
 | `--verbose`               | Include per-configuration detailed tables                 |
@@ -148,12 +142,12 @@ Replace `absolute_sum_minimization` with any of `function_learning`,
 ### `run_experiments.jl` flags
 
 ```
---quick              Reduced epochs (5) and samples for smoke testing
+--quick              Reduced epochs (5) and samples (5) for smoke testing
 --save               Save results to JSON
 --config             Use configurations from config.jl
 --paper              Use paper-ready configurations from paper_config.jl
---epochs N           Override epochs (default: 20)
---samples N          Override samples per configuration
+--epochs N           Override epochs (default: 120)
+--samples N          Override samples per configuration (default: 50)
 --output FILE        Override output filename
 --selection-mode M   MCTS/DAG-MCTS selection mode
 --degree D           Override tree branching degree
@@ -190,7 +184,7 @@ julia --project=. src/<experiment>/generate_tables.jl <stats.json> [FLAGS]
   "metadata": {
     "experiment_type": "absolute_sum_minimization",
     "timestamp": "...",
-    "n_epochs": 20,
+    "n_epochs": 120,
     "quick_mode": false,
     "optimizer_order": ["Random", "Best-First", "..."],
     "description": "",
@@ -228,4 +222,3 @@ Same structure as the raw JSON, plus:
 - each experiment gets an `"aggregate"` dict (mean / std / min / max per
   optimizer),
 - a top-level `"global_ranking"` dict gives average ranks across configs.
-

@@ -136,13 +136,22 @@ for (i, exp) in enumerate(experiments)
     end
 
     # 3. Compute aggregate statistics for EACH suite
+    #    For all experiments except function_learning, normalise final losses
+    #    by taking log_p before aggregation.
+    config_prime = if experiment_type != "function_learning" && haskey(exp, "config") && haskey(exp["config"], "prime")
+        Int(exp["config"]["prime"])
+    else
+        nothing
+    end
+
     for suite_name in sort(collect(all_suites))
         # Extract the results for this suite across all samples
         samples_in_suite = [s["suites"][suite_name] for s in valid_samples if haskey(s["suites"], suite_name)]
-        
+
         if !isempty(samples_in_suite)
             exp["suites_aggregate"][suite_name] = compute_aggregate_stats(
-                samples_in_suite, suite_name; extra_fields=extra_fields
+                samples_in_suite, suite_name;
+                extra_fields=extra_fields, log_prime=config_prime
             )
 
             # Print summary for this suite
