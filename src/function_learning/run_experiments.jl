@@ -164,7 +164,8 @@ end
     suite_results = Dict{String, Any}()
 
     # Run each suite independently
-    for (suite_name, opt_configs) in suite_configs
+    for suite_name in ordered_suite_names(suite_configs)
+        opt_configs = suite_configs[suite_name]
         # Run all optimizers in this suite serially
         suite_results[suite_name] = run_all_optimizers_serial(
             opt_configs, initial_param, loss, args.n_epochs;
@@ -188,6 +189,7 @@ end
     results = []
     for (config_idx, config) in enumerate(configs)
         sample_result = try
+            seed_sample_rng!(sample_num, config_idx)
             run_single_sample(config, sample_num, args)
         catch e 
             Dict{String, Any}("sample_num" => sample_num, "config_idx" => config_idx, "error" => string(e))
@@ -246,7 +248,7 @@ end
 # Main execution
 # ============================================================================
 
-Random.seed!(42)
+seed_all_rngs!()
 
 println("="^70)
 println("Function Learning Experiments")
@@ -313,7 +315,7 @@ if args.save_results
         experiment_type="function_learning",
         n_epochs=args.n_epochs,
         quick_mode=args.quick_mode,
-        suites=collect(keys(get_optimizer_configs(configs[1], args))),
+        suites=ordered_suite_names(get_optimizer_configs(configs[1], args)),
         description=args.description,
         git_commit=args.git_commit,
     )

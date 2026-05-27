@@ -17,11 +17,48 @@ using JSON
 using Printf
 using Dates
 using Random
+using Distributed
 
 const DEFAULT_EPOCHS = 120
 const DEFAULT_SAMPLES = 50
 const QUICK_EPOCHS = 5
 const QUICK_SAMPLES = 5
+const DEFAULT_RANDOM_SEED = 42
+const SAMPLE_SEED_STRIDE = 100_000
+
+"""
+    seed_all_rngs!(base_seed=DEFAULT_RANDOM_SEED)
+
+Seed the RNG on the master process and every distributed worker. Workers get a
+deterministic offset from `base_seed` so parallel runs do not inherit unrelated
+Julia worker RNG state.
+
+This is mostly hygiene: it controls any incidental randomness outside the
+per-sample path, but it does not by itself make `pmap` runs reproducible because
+task scheduling can assign a sample to different workers or different stream
+positions.
+"""
+function seed_all_rngs!(base_seed::Integer=DEFAULT_RANDOM_SEED)
+    Random.seed!(base_seed)
+    for worker in workers()
+        remotecall_wait(Random.seed!, worker, base_seed + worker)
+    end
+    return nothing
+end
+
+"""
+    seed_sample_rng!(sample_num, config_idx; base_seed=DEFAULT_RANDOM_SEED)
+
+Seed the RNG inside the worker task handling a concrete `(config, sample)` pair.
+This is the key reproducibility step: random problem generation is pinned to the
+logical sample identity rather than to whichever worker `pmap` assigns the pair
+to or to the worker's current RNG stream position.
+"""
+function seed_sample_rng!(sample_num::Integer, config_idx::Integer;
+                          base_seed::Integer=DEFAULT_RANDOM_SEED)
+    Random.seed!(base_seed + SAMPLE_SEED_STRIDE * Int(config_idx) + Int(sample_num))
+    return nothing
+end
 
 # ============================================================================
 # CLI Argument Parsing
@@ -180,13 +217,47 @@ const OPTIMIZER_ORDER = [
     "DOO"
 ]
 
+const SUITE_ORDER = [
+    "optimizer-comparison",
+    "mcts-branching",
+    "dag-mcts-branching",
+    "greedy-descent-branching",
+    "gradient-descent-branching",
+    "mcts-number-of-simulations",
+    "dag-mcts-number-of-simulations",
+    "mcts-exploration-constant",
+    "dag-mcts-exploration-constant",
+]
+
 const NAME_WIDTH = maximum(length(n) for n in OPTIMIZER_ORDER)
+
+function ordered_optimizer_names(opt_configs::Dict)
+    names = collect(keys(opt_configs))
+    ordered = String[]
+    for name in OPTIMIZER_ORDER
+        name in names && push!(ordered, name)
+    end
+    append!(ordered, sort([name for name in names if !(name in ordered)]))
+    return ordered
+end
+
+function ordered_suite_names(suite_configs::Dict)
+    names = collect(keys(suite_configs))
+    ordered = String[]
+    for name in SUITE_ORDER
+        name in names && push!(ordered, name)
+    end
+    append!(ordered, sort([name for name in names if !(name in ordered)]))
+    return ordered
+end
 
 """
     get_optimizer_configs(config::Dict, args::NamedTuple) -> Dict{String, Dict{String, Any}}
 
 Return a nested Dict of SuiteName => { OptimizerName => OptimizerSetup }.
-Each Setup is Dict("init" => (param, loss) -> OptimSetup).
+Each Setup contains:
+- `"init"`: `(param, loss) -> OptimSetup`
+- `"refinement_degree"`: the tree-refinement degree used by that optimizer
 
 Results are organized by suite to allow rigorous comparison. Optimizers may 
 appear in multiple suites and will be run independently for each.
@@ -210,10 +281,17 @@ function get_optimizer_configs(config::Dict, args::NamedTuple)
     
     p_float = Float64(prime)
 
+    function optimizer_setup(init_fn, refinement_degree)
+        return Dict(
+            "init" => init_fn,
+            "refinement_degree" => Int(refinement_degree),
+        )
+    end
+
     # Helper to create standard MCTS config
     function mk_mcts(sims, deg, exp=1.41)
-        return Dict(
-            "init" => (param, loss) -> begin
+        return optimizer_setup(
+            (param, loss) -> begin
                 c = NAML.MCTSConfig(
                     num_simulations=sims,
                     exploration_constant=exp,
@@ -221,14 +299,15 @@ function get_optimizer_configs(config::Dict, args::NamedTuple)
                     degree=deg
                 )
                 NAML.mcts_descent_init(param, loss, c)
-            end
+            end,
+            deg
         )
     end
 
     # Helper to create standard DAG-MCTS config
     function mk_dag_mcts(sims, deg, exp=1.41)
-        return Dict(
-            "init" => (param, loss) -> begin
+        return optimizer_setup(
+            (param, loss) -> begin
                 c = NAML.DAGMCTSConfig(
                     num_simulations=sims,
                     exploration_constant=exp,
@@ -237,7 +316,8 @@ function get_optimizer_configs(config::Dict, args::NamedTuple)
                     selection_mode=NAML.BestValue
                 )
                 NAML.dag_mcts_descent_init(param, loss, c)
-            end
+            end,
+            deg
         )
     end
 
@@ -248,17 +328,18 @@ function get_optimizer_configs(config::Dict, args::NamedTuple)
         k = binomial(dim, deg) * prime^deg
         sims_10k = quick ? 200 : 10 * k
 
-        s["Random"] = Dict("init" => (param, loss) -> NAML.random_descent_init(param, loss, 1, (false, deg)))
-        s["Best-First"] = Dict("init" => (param, loss) -> NAML.greedy_descent_init(param, loss, 1, (false, deg)))
-        s["Best-First-Gradient"] = Dict("init" => (param, loss) -> NAML.gradient_descent_init(param, loss, 1, (false, deg)))
+        s["Random"] = optimizer_setup((param, loss) -> NAML.random_descent_init(param, loss, 1, (false, deg)), deg)
+        s["Best-First"] = optimizer_setup((param, loss) -> NAML.greedy_descent_init(param, loss, 1, (false, deg)), deg)
+        s["Best-First-Gradient"] = optimizer_setup((param, loss) -> NAML.gradient_descent_init(param, loss, 1, (false, deg)), deg)
         s["MCTS-10k"] = mk_mcts(sims_10k, deg)
         s["DAG-MCTS-10k"] = mk_dag_mcts(sims_10k, deg)
-        s["DOO"] = Dict(
-            "init" => (param, loss) -> begin
+        s["DOO"] = optimizer_setup(
+            (param, loss) -> begin
                 delta = h -> p_float^(-h)
                 c = NAML.DOOConfig(delta=delta, degree=deg, strict=false)
                 NAML.doo_descent_init(param, loss, 1, c)
-            end
+            end,
+            deg
         )
         suites["optimizer-comparison"] = s
     end
@@ -288,16 +369,16 @@ function get_optimizer_configs(config::Dict, args::NamedTuple)
     # suite 3: Greedy Branching (2+ vars, deg 1 & 2)
     if args.use_greedy_branching && dim >= 2
         s = Dict{String, Any}()
-        s["Greedy-deg1"] = Dict("init" => (param, loss) -> NAML.greedy_descent_init(param, loss, 1, (false, 1)))
-        s["Greedy-deg2"] = Dict("init" => (param, loss) -> NAML.greedy_descent_init(param, loss, 1, (false, 2)))
+        s["Greedy-deg1"] = optimizer_setup((param, loss) -> NAML.greedy_descent_init(param, loss, 1, (false, 1)), 1)
+        s["Greedy-deg2"] = optimizer_setup((param, loss) -> NAML.greedy_descent_init(param, loss, 1, (false, 2)), 2)
         suites["greedy-descent-branching"] = s
     end
 
     # suite 4: Gradient Branching (2+ vars, deg 1 & 2)
     if args.use_gradient_branching && dim >= 2
         s = Dict{String, Any}()
-        s["Gradient-deg1"] = Dict("init" => (param, loss) -> NAML.gradient_descent_init(param, loss, 1, (false, 1)))
-        s["Gradient-deg2"] = Dict("init" => (param, loss) -> NAML.gradient_descent_init(param, loss, 1, (false, 2)))
+        s["Gradient-deg1"] = optimizer_setup((param, loss) -> NAML.gradient_descent_init(param, loss, 1, (false, 1)), 1)
+        s["Gradient-deg2"] = optimizer_setup((param, loss) -> NAML.gradient_descent_init(param, loss, 1, (false, 2)), 2)
         suites["gradient-descent-branching"] = s
     end
 
@@ -387,6 +468,7 @@ function run_single_optimizer(opt_name::String, opt_setup::Dict,
     # Deep copy starting parameter to avoid cross-thread mutation
     param_copy = deepcopy(initial_param)
     initial_loss_val = loss.eval([param_copy])[1]
+    refinement_degree = Int(opt_setup["refinement_degree"])
 
     try
         # Wrap loss with evaluation counting
@@ -422,6 +504,7 @@ function run_single_optimizer(opt_name::String, opt_setup::Dict,
             "improvement_ratio" => (initial_loss_val > 0) ?
                 (initial_loss_val - final_loss) / initial_loss_val : 0.0,
             "total_evals" => total_optimizer_evals,
+            "refinement_degree" => refinement_degree,
         )
 
         # Run experiment-specific post-processing (e.g., accuracy computation)
@@ -432,7 +515,10 @@ function run_single_optimizer(opt_name::String, opt_setup::Dict,
 
         return result
     catch e
-        return Dict{String, Any}("error" => string(e))
+        return Dict{String, Any}(
+            "error" => string(e),
+            "refinement_degree" => refinement_degree,
+        )
     end
 end
 
@@ -454,7 +540,7 @@ serially here avoids nested threading and contention on shared evaluator state.
 function run_all_optimizers_serial(opt_configs::Dict, initial_param, loss, n_epochs::Int;
                                     post_run_fn::Union{Function,Nothing}=nothing)
     results = Dict{String, Any}()
-    for opt_name in keys(opt_configs)
+    for opt_name in ordered_optimizer_names(opt_configs)
         opt_setup = opt_configs[opt_name]
         results[opt_name] = run_single_optimizer(opt_name, opt_setup, initial_param, loss, n_epochs;
                                                   post_run_fn=post_run_fn)
@@ -472,7 +558,7 @@ Returns a Dict mapping optimizer name => result Dict.
 """
 function run_all_optimizers_threaded(opt_configs::Dict, initial_param, loss, n_epochs::Int;
                                      post_run_fn::Union{Function,Nothing}=nothing)
-    opt_names = collect(keys(opt_configs))
+    opt_names = ordered_optimizer_names(opt_configs)
 
     results = Dict{String, Any}()
     result_lock = ReentrantLock()

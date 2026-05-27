@@ -77,11 +77,11 @@ Number of children of a polydisc node in the search tree.
 `prime` is the residue characteristic, `dimension` is the number of polydisc
 coordinates (one per learnable coefficient), and `degree` is the search-tree
 refinement degree (how many coordinate refinements happen per child step).
-
-TODO(user): replace this default with the exact formula you want.
 """
 function get_branching_factor(prime::Int, dimension::Int, degree::Int)
-    return prime^dimension
+    1 <= degree <= dimension ||
+        error("refinement degree must be between 1 and dimension, got degree=$degree, dimension=$dimension")
+    return binomial(dimension, degree) * prime^degree
 end
 
 """
@@ -105,16 +105,15 @@ function config_dimension(config::AbstractDict)
 end
 
 """
-    config_branching_factor(config; refinement_degree=1) -> Int
+    config_branching_factor(config; refinement_degree) -> Int
 
 Branching factor for an experiment config, computed via `get_branching_factor`.
-The `refinement_degree` defaults to 1 (one coordinate refined per child step).
+The caller must provide the actual optimizer refinement degree.
 """
-function config_branching_factor(config::AbstractDict; refinement_degree::Int=1)
+function config_branching_factor(config::AbstractDict; refinement_degree::Int)
     return get_branching_factor(Int(config["prime"]), config_dimension(config),
                                 refinement_degree)
 end
-
 
 # ============================================================================
 # Generic per-optimizer aggregation across experiments
@@ -359,18 +358,21 @@ end
 
 """
     mean_metric_by_branching_factor(experiments, optimizer_order, extractor;
-                                    refinement_degree=1, suite_name=nothing)
+                                    suite_name=nothing)
         -> Dict{String, Vector{Tuple{Int,Float64}}}
 
 For each optimizer, group experiments by branching factor and average
 `extractor(opt_stats)` within each group. Returned vectors are sorted by
 branching factor. As with `mean_metric_across_experiments`, `suite_name`
 selects which per-suite aggregate to read.
+
+Each optimizer aggregate must include `"refinement_degree"`, recorded by the
+experiment runner from the optimizer setup. This function deliberately does not
+infer degrees from optimizer names or suite names.
 """
 function mean_metric_by_branching_factor(experiments,
                                           optimizer_order::AbstractVector,
                                           extractor;
-                                          refinement_degree::Int=1,
                                           suite_name=nothing)
     buckets = Dict{Any, Dict{Int, Vector{Float64}}}(
         opt => Dict{Int, Vector{Float64}}() for opt in optimizer_order
@@ -380,10 +382,15 @@ function mean_metric_by_branching_factor(experiments,
         agg = experiment_aggregate(exp; suite_name=suite_name)
         agg === nothing && continue
         haskey(exp, "config") || continue
-        bf = config_branching_factor(exp["config"]; refinement_degree=refinement_degree)
         for opt in optimizer_order
-            v = extractor(get(agg, opt, nothing))
+            opt_stats = get(agg, opt, nothing)
+            v = extractor(opt_stats)
             v === nothing && continue
+            if opt_stats === nothing || !haskey(opt_stats, "refinement_degree")
+                error("Missing refinement_degree for optimizer $(opt); regenerate raw results with the current experiment runner")
+            end
+            degree = Int(opt_stats["refinement_degree"])
+            bf = config_branching_factor(exp["config"]; refinement_degree=degree)
             push!(get!(buckets[opt], bf, Float64[]), v)
         end
     end
@@ -486,6 +493,8 @@ function compute_aggregate_stats(samples_in_suite::AbstractVector, suite_name::S
                 "std_final_loss" => length(final_losses) > 1 ? _std(final_losses) : 0.0,
                 "min_final_loss" => minimum(final_losses),
                 "max_final_loss" => maximum(final_losses),
+                "mean_raw_final_loss" => _mean(raw_losses),
+                "std_raw_final_loss" => length(raw_losses) > 1 ? _std(raw_losses) : 0.0,
                 "mean_improvement" => _mean([d["improvement"] for d in opt_data]),
                 "mean_improvement_ratio" => _mean([d["improvement_ratio"] for d in opt_data]),
                 "mean_time" => _mean([d["time"] for d in opt_data]),
@@ -496,6 +505,16 @@ function compute_aggregate_stats(samples_in_suite::AbstractVector, suite_name::S
             # Eval counts
             if haskey(opt_data[1], "total_evals")
                 agg["mean_total_evals"] = _mean([d["total_evals"] for d in opt_data])
+            end
+
+            # Refinement degree is experiment metadata, not a statistic. It
+            # should be constant across samples for a given optimizer.
+            degrees = unique(Int(d["refinement_degree"]) for d in opt_data
+                             if haskey(d, "refinement_degree"))
+            if length(degrees) == 1
+                agg["refinement_degree"] = only(degrees)
+            elseif length(degrees) > 1
+                error("Inconsistent refinement_degree values for optimizer $(opt_name) in suite $(suite_name): $(degrees)")
             end
 
             # Rankings
