@@ -149,7 +149,7 @@ while [ $i -le $# ]; do
             i=$((i+1))
             ;;
         *)
-            i=$((i+1))
+            err "Unknown argument: $arg"
             ;;
     esac
 done
