@@ -170,8 +170,8 @@ println("="^70)
 println("Absolute Sum Minimization Experiments")
 println("Start time: $(Dates.now())")
 println("Epochs: $(args.n_epochs), Quick: $(args.quick_mode)")
-if !isnothing(args.mcts_degree_override)
-    println("MCTS/DAG-MCTS/DOO degree override: $(args.mcts_degree_override)")
+if !isnothing(args.tree_degree_override)
+    println("Tree degree override: $(args.tree_degree_override)")
 end
 println("="^70)
 

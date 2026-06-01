@@ -70,18 +70,20 @@ const DISPLAY_ORDER = [
 # ============================================================================
 
 """
-    get_branching_factor(prime, dimension, degree) -> Int
+    get_branching_factor(prime, dimension, degree; strict=false) -> Int
 
 Number of children of a polydisc node in the search tree.
 
 `prime` is the residue characteristic, `dimension` is the number of polydisc
 coordinates (one per learnable coefficient), and `degree` is the search-tree
 refinement degree (how many coordinate refinements happen per child step).
+In strict mode, a fixed coordinate subset is refined at each depth, so the
+branching factor is `p^degree`.
 """
-function get_branching_factor(prime::Int, dimension::Int, degree::Int)
+function get_branching_factor(prime::Int, dimension::Int, degree::Int; strict::Bool=false)
     1 <= degree <= dimension ||
         error("refinement degree must be between 1 and dimension, got degree=$degree, dimension=$dimension")
-    return binomial(dimension, degree) * prime^degree
+    return strict ? prime^degree : binomial(dimension, degree) * prime^degree
 end
 
 """
@@ -96,23 +98,24 @@ Polydisc dimension implied by an experiment config.
 """
 function config_dimension(config::AbstractDict)
     if haskey(config, "num_vars")
-        return Int(config["num_vars"])
+        return config["num_vars"]
     elseif haskey(config, "degree")
-        return Int(config["degree"]) + 1
+        return config["degree"] + 1
     else
         error("Cannot infer dimension from config: $(config)")
     end
 end
 
 """
-    config_branching_factor(config; refinement_degree) -> Int
+    config_branching_factor(config; refinement_degree, strict_refinement=false) -> Int
 
 Branching factor for an experiment config, computed via `get_branching_factor`.
 The caller must provide the actual optimizer refinement degree.
 """
-function config_branching_factor(config::AbstractDict; refinement_degree::Int)
-    return get_branching_factor(Int(config["prime"]), config_dimension(config),
-                                refinement_degree)
+function config_branching_factor(config::AbstractDict; refinement_degree::Int,
+                                 strict_refinement::Bool=false)
+    return get_branching_factor(config["prime"], config_dimension(config),
+                                refinement_degree; strict=strict_refinement)
 end
 
 # ============================================================================
@@ -256,7 +259,7 @@ function mean_metric_by_dimension(experiments,
         agg = experiment_aggregate(exp; suite_name=suite_name)
         agg === nothing && continue
         haskey(exp, "config") || continue
-        Int(exp["config"]["prime"]) == prime || continue
+        exp["config"]["prime"] == prime || continue
         dim = config_dimension(exp["config"])
         for opt in optimizer_order
             v = extractor(get(agg, opt, nothing))
@@ -293,7 +296,7 @@ function mean_metric_by_prime(experiments,
         agg === nothing && continue
         haskey(exp, "config") || continue
         haskey(exp["config"], "prime") || continue
-        prime = Int(exp["config"]["prime"])
+        prime = exp["config"]["prime"]
         for opt in optimizer_order
             v = extractor(get(agg, opt, nothing))
             v === nothing && continue
@@ -351,7 +354,7 @@ function experiment_primes(experiments)
     for exp in experiments
         haskey(exp, "config") || continue
         haskey(exp["config"], "prime") || continue
-        push!(primes, Int(exp["config"]["prime"]))
+        push!(primes, exp["config"]["prime"])
     end
     return sort(collect(primes))
 end
@@ -366,9 +369,9 @@ For each optimizer, group experiments by branching factor and average
 branching factor. As with `mean_metric_across_experiments`, `suite_name`
 selects which per-suite aggregate to read.
 
-Each optimizer aggregate must include `"refinement_degree"`, recorded by the
-experiment runner from the optimizer setup. This function deliberately does not
-infer degrees from optimizer names or suite names.
+Each optimizer aggregate should include `"branching_factor"`; current runners
+record it directly because strict and non-strict optimizers have different
+branching formulas. Older aggregates fall back to `"refinement_degree"`.
 """
 function mean_metric_by_branching_factor(experiments,
                                           optimizer_order::AbstractVector,
@@ -386,11 +389,20 @@ function mean_metric_by_branching_factor(experiments,
             opt_stats = get(agg, opt, nothing)
             v = extractor(opt_stats)
             v === nothing && continue
-            if opt_stats === nothing || !haskey(opt_stats, "refinement_degree")
+            if opt_stats === nothing
+                continue
+            end
+            if haskey(opt_stats, "branching_factor")
+                bf = opt_stats["branching_factor"]
+            elseif haskey(opt_stats, "refinement_degree")
+                degree = opt_stats["refinement_degree"]
+                strict = get(opt_stats, "strict_refinement", false)
+                bf = config_branching_factor(exp["config"];
+                                             refinement_degree=degree,
+                                             strict_refinement=strict)
+            else
                 error("Missing refinement_degree for optimizer $(opt); regenerate raw results with the current experiment runner")
             end
-            degree = Int(opt_stats["refinement_degree"])
-            bf = config_branching_factor(exp["config"]; refinement_degree=degree)
             push!(get!(buckets[opt], bf, Float64[]), v)
         end
     end
@@ -509,12 +521,29 @@ function compute_aggregate_stats(samples_in_suite::AbstractVector, suite_name::S
 
             # Refinement degree is experiment metadata, not a statistic. It
             # should be constant across samples for a given optimizer.
-            degrees = unique(Int(d["refinement_degree"]) for d in opt_data
+            degrees = unique(d["refinement_degree"] for d in opt_data
                              if haskey(d, "refinement_degree"))
             if length(degrees) == 1
                 agg["refinement_degree"] = only(degrees)
             elseif length(degrees) > 1
                 error("Inconsistent refinement_degree values for optimizer $(opt_name) in suite $(suite_name): $(degrees)")
+            end
+
+            # Branching metadata is constant across samples for a given optimizer.
+            branching_factors = unique(d["branching_factor"] for d in opt_data
+                                       if haskey(d, "branching_factor"))
+            if length(branching_factors) == 1
+                agg["branching_factor"] = only(branching_factors)
+            elseif length(branching_factors) > 1
+                error("Inconsistent branching_factor values for optimizer $(opt_name) in suite $(suite_name): $(branching_factors)")
+            end
+
+            strict_values = unique(d["strict_refinement"] for d in opt_data
+                                   if haskey(d, "strict_refinement"))
+            if length(strict_values) == 1
+                agg["strict_refinement"] = only(strict_values)
+            elseif length(strict_values) > 1
+                error("Inconsistent strict_refinement values for optimizer $(opt_name) in suite $(suite_name): $(strict_values)")
             end
 
             # Rankings
