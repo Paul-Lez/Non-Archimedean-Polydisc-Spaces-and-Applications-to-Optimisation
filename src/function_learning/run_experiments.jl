@@ -19,7 +19,7 @@ Flags:
     --selection-mode M   MCTS selection mode: BestValue, VisitCount, or BestLoss
     --degree D    Override tree branching degree
     --description TEXT   Experiment description
-    --git-commit HASH   Git commit hash
+    --git-commit HASH   Experiment repository git commit hash
 """
 
 # ============================================================================

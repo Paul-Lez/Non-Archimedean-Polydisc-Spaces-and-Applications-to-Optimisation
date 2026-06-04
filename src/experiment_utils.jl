@@ -670,6 +670,7 @@ function build_metadata(; experiment_type::String,
                           description::String="",
                           git_commit::String="",
                           extra::Dict{String,Any}=Dict{String,Any}())
+    naml_version = pkgversion(NAML)
     metadata = Dict{String, Any}(
         "experiment_type" => experiment_type,
         "timestamp" => Dates.format(Dates.now(), "yyyy-mm-dd HH:MM:SS"),
@@ -678,7 +679,9 @@ function build_metadata(; experiment_type::String,
         "optimizer_order" => optimizer_order,
         "suites" => suites,
         "description" => description,
-        "git_commit" => git_commit,
+        "experiment_git_commit" => git_commit,
+        "naml_version" => isnothing(naml_version) ? "" : string(naml_version),
+        "julia_version" => string(VERSION),
     )
     merge!(metadata, extra)
     return metadata

@@ -18,7 +18,7 @@ Flags:
     --selection-mode M   MCTS selection mode: BestValue, VisitCount, or BestLoss
     --degree D    Override tree branching degree
     --description TEXT   Experiment description
-    --git-commit HASH   Git commit hash
+    --git-commit HASH   Experiment repository git commit hash
 
 Examples:
     julia --project=. src/absolute_sum_minimization/run_experiments.jl --quick
@@ -44,7 +44,6 @@ end
     using Random, Dates, Printf
     include(joinpath(@__DIR__, "../util.jl"))
     include(joinpath(@__DIR__, "../experiment_utils.jl"))
-    include(joinpath(@__DIR__, "util.jl"))
 end
 
 # Parse CLI arguments
@@ -81,7 +80,7 @@ configs = load_configs(args, default_configs)
     loss = generate_random_absolute_sum_problem(p, prec, num_polys, num_vars, degree)
 
     # Initialize starting point (Gauss point)
-    initial_param = generate_initial_point(num_vars, K)
+    initial_param = generate_absolute_sum_initial_point(num_vars, K)
     initial_loss = loss.eval([initial_param])[1]
 
     # Get suite configs (SuiteName => {OptName => Setup})

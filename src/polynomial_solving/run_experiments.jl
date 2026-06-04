@@ -18,7 +18,7 @@ Flags:
     --selection-mode M   MCTS selection mode: BestValue, VisitCount, or BestLoss
     --degree D    Override tree branching degree
     --description TEXT   Experiment description
-    --git-commit HASH   Git commit hash
+    --git-commit HASH   Experiment repository git commit hash
 """
 
 # ============================================================================
@@ -40,7 +40,6 @@ end
     using Random, Dates, Printf
     include(joinpath(@__DIR__, "../util.jl"))
     include(joinpath(@__DIR__, "../experiment_utils.jl"))
-    include(joinpath(@__DIR__, "util.jl"))
 end
 
 args = parse_experiment_args(ARGS)
@@ -75,7 +74,7 @@ configs = load_configs(args, default_configs)
     loss, root = generate_polynomial_solving_problem(p, prec, num_vars, degree)
 
     # Initialize starting point (Gauss point)
-    initial_param = generate_initial_point(num_vars, K)
+    initial_param = generate_polynomial_solving_initial_point(num_vars, K)
     initial_loss = loss.eval([initial_param])[1]
 
     # Get suite configs (SuiteName => {OptName => Setup})

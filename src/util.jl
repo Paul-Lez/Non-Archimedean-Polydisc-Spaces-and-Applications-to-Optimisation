@@ -8,6 +8,8 @@ This module provides:
 4. Cross-entropy loss functions for smooth optimization
 5. MSE loss functions
 6. Gauss point generation
+7. Absolute sum minimization problem generation
+8. Polynomial solving problem generation with guaranteed roots
 """
 
 using Oscar
@@ -874,4 +876,245 @@ function generate_random_polynomial(K::PadicField, num_vars::Int, degree::Int, v
         end
     end
     return poly
+end
+
+
+# ============================================================================
+# Absolute sum minimization helpers
+# ============================================================================
+
+"""
+    create_absolute_sum_loss(f::NAML.PolydiscFunction{S}, ::Type{VP}) where {S, VP<:NAML.ValuationPolydisc}
+    -> NAML.Loss
+
+Create a loss function from a PolydiscFunction using typed evaluators.
+
+# Arguments
+- `f::NAML.PolydiscFunction{S}`: The function to minimize (e.g., LinearAbsolutePolynomialSum)
+- `::Type{VP}`: The polydisc type for typed evaluator construction
+
+# Returns
+- A `NAML.Loss` struct that evaluates using typed evaluators
+"""
+function create_absolute_sum_loss(f::NAML.PolydiscFunction{S}, ::Type{VP}) where {S, VP<:NAML.ValuationPolydisc}
+    batch_eval = NAML.batch_evaluate_init(f, VP)
+    batch_fn = (params) -> map(batch_eval, params)
+    grad_fn = (vs) -> [NAML.directional_derivative(batch_eval, v) for v in vs]
+    return NAML.Loss(batch_fn, grad_fn)
+end
+
+# Legacy fallback for backward compatibility
+function create_absolute_sum_loss(polys::Vector{<:NAML.PolydiscFunction{S}}) where S
+    total_sum = sum(polys)
+    batch_eval = NAML.batch_evaluate_init(total_sum)
+    batch_fn = (params) -> map(batch_eval, params)
+    grad_fn = (vs) -> [NAML.directional_derivative(batch_eval, v) for v in vs]
+    return NAML.Loss(batch_fn, grad_fn)
+end
+
+
+"""
+    generate_random_absolute_sum_problem(p::Int, prec::Int, num_polys::Int,
+                                        num_vars::Int, degree::Int)
+    -> NAML.Loss
+
+Generate a random absolute sum minimization problem.
+
+Creates random polynomials f₁, ..., fₙ and returns a loss function L(x) = |f₁(x)| + ... + |fₙ(x)|
+
+For linear polynomials (degree=1), uses LinearAbsolutePolynomialSum for efficiency.
+For higher degrees, uses AbsolutePolynomialSum.
+
+# Arguments
+- `p::Int`: Prime for p-adic field
+- `prec::Int`: p-adic precision
+- `num_polys::Int`: Number of polynomials in the sum
+- `num_vars::Int`: Number of variables (dimension)
+- `degree::Int`: Degree of each polynomial (1=linear, 2=quadratic, etc.)
+
+# Returns
+- A `NAML.Loss` function that can be minimized
+"""
+function generate_random_absolute_sum_problem(p::Int, prec::Int, num_polys::Int,
+                                             num_vars::Int, degree::Int)
+    K = PadicField(p, prec)
+
+    # Construct polydisc type for typed evaluators
+    VP = NAML.ValuationPolydisc{PadicFieldElem, Int, num_vars}
+
+    # In degree 1 use the faster absolute linear polynomial sum implementation
+    if degree == 1
+        # Flatten all linear polynomials into a single LinearAbsolutePolynomialSum
+        linear_polys = [generate_random_linear_polynomial(K, num_vars) for _ in 1:num_polys]
+        total_func = NAML.LinearAbsolutePolynomialSum(linear_polys)
+    else
+        # Flatten all polynomials into a single AbsolutePolynomialSum
+        var_names = ["x$i" for i in 1:num_vars]
+        R, _ = polynomial_ring(K, var_names)
+
+        polys = [generate_random_polynomial(K, num_vars, degree, var_names) for _ in 1:num_polys]
+        total_func = NAML.AbsolutePolynomialSum(polys)
+    end
+
+    return create_absolute_sum_loss(total_func, VP)
+end
+
+
+"""
+    generate_absolute_sum_initial_point(num_vars::Int, K::PadicField) -> NAML.ValuationPolydisc
+
+Generate an initial point for absolute sum minimization.
+
+The point is centered at (1, 1, ..., 1) with radius 0.
+"""
+function generate_absolute_sum_initial_point(num_vars::Int, K::PadicField)
+    center = ntuple(i -> K(1), num_vars)
+    radius = ntuple(i -> 0, num_vars)
+    return NAML.ValuationPolydisc(center, radius)
+end
+
+
+# ============================================================================
+# Polynomial solving helpers
+# ============================================================================
+
+"""
+    generate_random_padic_integer(K::PadicField, num_terms::Int=8) -> PadicFieldElem
+
+Generate a random p-adic integer (valuation ≥ 0) in K.
+"""
+function generate_random_padic_integer(K::PadicField, num_terms::Int=8)
+    p = Int(Oscar.prime(K))
+    prec = Oscar.precision(K)
+    return generate_random_padic(p, prec, 0, num_terms)
+end
+
+
+"""
+    generate_univariate_polynomial_with_roots(K::PadicField, degree::Int)
+    -> (AbsolutePolynomialSum, Vector{PadicFieldElem})
+
+Generate a univariate polynomial of given degree with random roots in Z_p.
+
+Constructs f(x) = (x - r₁)(x - r₂)⋯(x - r_d) where each rᵢ is a random p-adic integer.
+
+# Returns
+- `func`: An AbsolutePolynomialSum wrapping the polynomial
+- `roots`: The vector of roots [r₁, ..., r_d]
+"""
+function generate_univariate_polynomial_with_roots(K::PadicField, degree::Int)
+    # Generate random roots in Z_p
+    roots = [generate_random_padic_integer(K) for _ in 1:degree]
+
+    # Build polynomial ring
+    R, (x,) = polynomial_ring(K, ["x"])
+
+    # Construct f(x) = ∏(x - rᵢ)
+    poly = R(1)
+    for r in roots
+        poly *= (x - r)
+    end
+
+    func = NAML.AbsolutePolynomialSum([poly])
+    return func, roots
+end
+
+
+"""
+    generate_multivariate_polynomial_with_root(K::PadicField, num_vars::Int, degree::Int)
+    -> (AbsolutePolynomialSum, Vector{PadicFieldElem})
+
+Generate a multivariate polynomial of given degree with a guaranteed root in Z_p^n.
+
+Constructs f(x₁,…,xₙ) = ∏ᵢ₌₁ᵈ lᵢ(x) where each lᵢ is a random linear form
+that vanishes at a common random point r ∈ Z_p^n:
+
+    lᵢ(x) = aᵢ₁x₁ + aᵢ₂x₂ + ⋯ + aᵢₙxₙ - (aᵢ₁r₁ + ⋯ + aᵢₙrₙ)
+
+So f(r) = 0 by construction.
+
+# Returns
+- `func`: An AbsolutePolynomialSum wrapping the polynomial
+- `root`: The vector [r₁, ..., rₙ] ∈ Z_p^n where f vanishes
+"""
+function generate_multivariate_polynomial_with_root(K::PadicField, num_vars::Int, degree::Int)
+    # Generate a random root in Z_p^n
+    root = [generate_random_padic_integer(K) for _ in 1:num_vars]
+
+    # Build polynomial ring
+    var_names = ["x$i" for i in 1:num_vars]
+    R, vars = polynomial_ring(K, var_names)
+
+    # Construct polynomial as product of d random linear forms vanishing at root
+    poly = R(1)
+    for _ in 1:degree
+        # Random coefficients for the linear form
+        coeffs = [generate_random_padic_integer(K) for _ in 1:num_vars]
+
+        # Ensure at least one coefficient is a unit (nonzero mod p) to get a nontrivial form
+        # Replace first coeff with a unit if all are zero mod p
+        p = Int(Oscar.prime(K))
+        if all(NAML.valuation(c) > 0 for c in coeffs)
+            coeffs[1] = K(1 + rand(0:(p-1)))
+        end
+
+        # Build linear form: Σ aᵢ xᵢ - Σ aᵢ rᵢ
+        linear_form = sum(coeffs[i] * vars[i] for i in 1:num_vars)
+        constant = sum(coeffs[i] * root[i] for i in 1:num_vars)
+        linear_form -= constant
+
+        poly *= linear_form
+    end
+
+    func = NAML.AbsolutePolynomialSum([poly])
+    return func, root
+end
+
+
+"""
+    generate_polynomial_solving_problem(p::Int, prec::Int, num_vars::Int, degree::Int)
+    -> (Loss, Vector{PadicFieldElem})
+
+Generate a polynomial solving problem: minimize |f(z)| where f has a known root.
+
+# Arguments
+- `p::Int`: Prime for p-adic field
+- `prec::Int`: p-adic precision
+- `num_vars::Int`: Number of variables (1, 2, or 3)
+- `degree::Int`: Degree of the polynomial (1, 2, or 3)
+
+# Returns
+- `loss`: A Loss function computing |f(z)|
+- `root`: The known root (for verification)
+"""
+function generate_polynomial_solving_problem(p::Int, prec::Int, num_vars::Int, degree::Int)
+    K = PadicField(p, prec)
+
+    if num_vars == 1
+        func, roots = generate_univariate_polynomial_with_roots(K, degree)
+        root = roots  # Return all roots
+    else
+        func, root = generate_multivariate_polynomial_with_root(K, num_vars, degree)
+    end
+
+    # Construct polydisc type for typed evaluators
+    VP = NAML.ValuationPolydisc{PadicFieldElem, Int, num_vars}
+
+    # Create loss using typed evaluator
+    batch_eval = NAML.batch_evaluate_init(func, VP)
+    batch_fn = (params) -> map(batch_eval, params)
+    grad_fn = (vs) -> [NAML.directional_derivative(batch_eval, v) for v in vs]
+    loss = NAML.Loss(batch_fn, grad_fn)
+
+    return loss, root
+end
+
+
+"""
+    generate_polynomial_solving_initial_point(num_vars::Int, K::PadicField) -> ValuationPolydisc
+
+Generate the Gauss point (unit ball centered at 0) as starting point.
+"""
+function generate_polynomial_solving_initial_point(num_vars::Int, K::PadicField)
+    return NAML.ValuationPolydisc(ntuple(i -> K(0), num_vars), ntuple(i -> 0, num_vars))
 end

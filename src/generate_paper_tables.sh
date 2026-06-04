@@ -18,6 +18,10 @@
 #   --degree D        Override tree branching degree (default: auto)
 #   --verbose         Include per-configuration detailed tables
 #   -p N, --procs N   Launch Julia with N additional worker processes (passed as `julia -p N`)
+#
+# Raw JSON metadata is annotated automatically with the experiment repository
+# commit, the NonArchimedeanMachineLearning.jl package version, and the Julia
+# VERSION used by each run_experiments.jl process.
 # ==============================================================================
 
 set -euo pipefail
@@ -173,6 +177,14 @@ err()  { echo "  ERROR: $*" >&2; exit 1; }
 START_TIME=$(date +%s)
 
 # ----------------------------------------------------------------------------
+# Run provenance metadata
+# ----------------------------------------------------------------------------
+
+EXPERIMENT_GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+
+echo "Experiment repository commit: $EXPERIMENT_GIT_COMMIT"
+
+# ----------------------------------------------------------------------------
 # Per-run output directory: logs/<timestamp>
 #
 # All artifacts produced by this invocation (raw JSON, stats JSON, LaTeX
@@ -207,6 +219,7 @@ run_pipeline() {
         "$DIR/run_experiments.jl" \
         --save \
         --output "$RAW_PATH" \
+        --git-commit "$EXPERIMENT_GIT_COMMIT" \
         $SUITE_FLAGS $QUICK_FLAG $EPOCHS_FLAG $SAMPLES_FLAG $SELECTION_MODE_FLAG $DEGREE_FLAG \
         ${DESCRIPTION:+--description "$DESCRIPTION"}
     ok "Raw results: $RAW_PATH"
