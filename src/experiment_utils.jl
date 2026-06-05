@@ -50,9 +50,9 @@ end
     seed_sample_rng!(sample_num, config_idx; base_seed=DEFAULT_RANDOM_SEED)
 
 Seed the RNG inside the worker task handling a concrete `(config, sample)` pair.
-This is the key reproducibility step: random problem generation is pinned to the
-logical sample identity rather than to whichever worker `pmap` assigns the pair
-to or to the worker's current RNG stream position.
+This means that the random problem generation is pinned to the
+sample identity rather than to whichever worker `pmap` assigns the pair
+and so on.
 """
 function seed_sample_rng!(sample_num::Integer, config_idx::Integer;
                           base_seed::Integer=DEFAULT_RANDOM_SEED)
@@ -209,6 +209,7 @@ end
 # Optimizer Factory
 # ============================================================================
 
+# perhaps confusingly in the naming scheme here, k is the branching factor!
 """Canonical display ordering for all experiments."""
 const OPTIMIZER_ORDER = [
     "Random", "Best-First", "Best-First-branch2", "Best-First-Gradient",
@@ -252,7 +253,7 @@ function ordered_suite_names(suite_configs::Dict)
 end
 
 """
-    get_optimizer_configs(config::Dict, args::NamedTuple) -> Dict{String, Dict{String, Any}}
+    get_optimizer_configs(config::Dict, args::NamedTuple; doo_delta_scale::Real=1) -> Dict{String, Dict{String, Any}}
 
 Return a nested Dict of SuiteName => { OptimizerName => OptimizerSetup }.
 Each Setup contains:
@@ -265,7 +266,7 @@ Each Setup contains:
 Results are organized by suite to allow rigorous comparison. Optimizers may 
 appear in multiple suites and will be run independently for each.
 """
-function get_optimizer_configs(config::Dict, args::NamedTuple)
+function get_optimizer_configs(config::Dict, args::NamedTuple; doo_delta_scale::Real=1)
     suites = Dict{String, Dict{String, Any}}()
 
     prime = config["prime"]
@@ -284,6 +285,7 @@ function get_optimizer_configs(config::Dict, args::NamedTuple)
     selection_mode = args.selection_mode
     
     p_float = Float64(prime)
+    delta_scale = Float64(doo_delta_scale)
 
     function optimizer_setup(init_fn, refinement_degree;
                              strict_refinement=false,
@@ -338,7 +340,7 @@ function get_optimizer_configs(config::Dict, args::NamedTuple)
         )
     end
 
-    # suite 0: Standard Optimizer Comparison (legacy --paper)
+    # suite 0: Standard Optimizer Comparison
     if args.use_optimizer_comparison
         s = Dict{String, Any}()
         deg = effective_degree(dim, args.tree_degree_override)
@@ -356,7 +358,7 @@ function get_optimizer_configs(config::Dict, args::NamedTuple)
         s["DAG-MCTS-10k"] = mk_dag_mcts(sims_10k, deg)
         s["DOO"] = optimizer_setup(
             (param, loss) -> begin
-                delta = h -> p_float^(-h)
+                delta = h -> delta_scale * p_float^(-h)
                 c = NAML.DOOConfig(delta=delta, degree=deg, strict=true)
                 NAML.doo_descent_init(param, loss, 1, c)
             end,
@@ -486,6 +488,9 @@ end
 
 Approximate the number of MCTS steps before the run either
 hits the configured epoch cap or reaches max precision.
+
+This is used to compute the number of steps we give to DOO to make the number of function evaluations 
+roughly match.
 """
 function effective_mcts_steps(num_dims::Int, precision::Int,
                               optimizer_degree::Int, max_epochs::Int)
@@ -548,6 +553,7 @@ function run_single_optimizer(opt_name::String, opt_setup::Dict,
         losses = Float64[]
         t_start = time()
 
+        # run until convergence
         for epoch in 1:effective_n_epochs
             current_loss = NAML.eval_loss(optim)
             push!(losses, current_loss)

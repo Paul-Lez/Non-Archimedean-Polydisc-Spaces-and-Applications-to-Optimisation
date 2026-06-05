@@ -84,7 +84,7 @@ configs = load_configs(args, default_configs)
     initial_loss = loss.eval([initial_param])[1]
 
     # Get suite configs (SuiteName => {OptName => Setup})
-    suite_configs = get_optimizer_configs(config, args)
+    suite_configs = get_optimizer_configs(config, args; doo_delta_scale=num_polys)
 
     # Holder for all results: SuiteName => {OptName => Result}
     suite_results = Dict{String, Any}()

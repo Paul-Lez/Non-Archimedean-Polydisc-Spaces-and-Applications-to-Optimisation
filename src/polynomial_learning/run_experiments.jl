@@ -89,7 +89,7 @@ configs = load_configs(args, default_configs)
     y_values = [evaluate(polynomial, [x]) for x in x_values]
     data = collect(zip(x_values, y_values))
 
-    # Create loss (p-adic output, no cutoff)
+    # Create loss
     loss = polynomial_to_linear_loss(data, degree, nothing)
 
     # Initial parameters at Gauss point
@@ -98,7 +98,7 @@ configs = load_configs(args, default_configs)
     initial_loss = loss.eval([initial_param])[1]
 
     # Get suite configs (SuiteName => {OptName => Setup})
-    suite_configs = get_optimizer_configs(config, args)
+    suite_configs = get_optimizer_configs(config, args; doo_delta_scale=n_points)
 
     # Holder for all results: SuiteName => {OptName => Result}
     suite_results = Dict{String, Any}()

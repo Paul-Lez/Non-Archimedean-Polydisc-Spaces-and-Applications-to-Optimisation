@@ -158,7 +158,11 @@ end
     end
 
     # Get suite configs (SuiteName => {OptName => Setup})
-    suite_configs = get_optimizer_configs(config, args)
+    # The loss sums per-point terms. For cross entropy composed with sigmoid,
+    # the derivative is bounded by 1/scale.
+    suite_configs = get_optimizer_configs(
+        config, args; doo_delta_scale=n_points * (1.0 / scale)
+    )
 
     # Holder for all results: SuiteName => {OptName => Result}
     suite_results = Dict{String, Any}()
