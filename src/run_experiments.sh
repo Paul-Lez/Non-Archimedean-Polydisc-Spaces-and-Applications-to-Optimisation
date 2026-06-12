@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# generate_paper_tables.sh
+# run_experiments.sh
 #
 # Three-stage pipeline for paper experiments:
 #   1. run_experiments.jl → raw JSON (per-sample results, no aggregation)
@@ -8,7 +8,7 @@
 #   3. generate_tables.jl → LaTeX tables (reads stats JSON)
 #
 # Usage:
-#   bash src/generate_paper_tables.sh [--quick] [--epochs N] [--samples N] [--selection-mode M] [--degree D] [--verbose] [-p N]
+#   bash src/run_experiments.sh [--quick] [--epochs N] [--samples N] [--selection-mode M] [--degree D] [--verbose] [-p N]
 #
 # Flags:
 #   --quick           Reduced epochs/simulations for smoke testing
